@@ -19,7 +19,8 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() && 
         (request.auth.token.email == "dalind1990@gmail.com" || 
-         request.auth.token.email == "dalinadjib169@gmail.com");
+         request.auth.token.email == "dalinadjib169@gmail.com" ||
+         request.auth.token.email == "dalinadjib1990@gmail.com");
     }
 
     function isValidId(id) {

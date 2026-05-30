@@ -4,8 +4,8 @@
   "description": "منصة الأستاذ دالي التعليمية المدعومة بالذكاء الاصطناعي للإجابة على أسئلة الطلاب ومتابعتهم تدرجياً بعقلية جزائرية مسلمة.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b1329",
-  "theme_color": "#10b981",
+  "background_color": "#0b132a",
+  "theme_color": "#2563eb",
   "orientation": "portrait-primary",
   "icons": [
     {

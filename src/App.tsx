@@ -47,14 +47,16 @@ import {
   Upload,
   CheckCircle,
   Clock,
-  ExternalLink
+  ExternalLink,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChatSession, ChatMessage, GlobalSettings } from './types';
+import FunctionStudyCorner from './components/FunctionStudyCorner';
 
 // Default teacher profile avatar (Algerian colors / theme) if none is configured
 const DEFAULT_AVATAR = "https://res.cloudinary.com/doaxziqm7/image/upload/v1716912345/almoalem_placeholder.png";
-const DEFAULT_WELCOME = "مرحبا بيك خويا اختي انا الاستاذ دالي استاذ مادة رياضيات و مبرمج بذكاء اصطناعي كيفاش نقدر نساعدك";
+const DEFAULT_WELCOME = "مرحبا انا الاستاذ دالي نجيب، ماذا تريد ان اشرح لك اليوم او كيف يمككني مساعدتك؟";
 
 export default function App() {
   // Authentication & Users State
@@ -63,7 +65,7 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
 
   // Layout UI navigation
-  const [activeTab, setActiveTab] = useState<'chat' | 'admin'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'functions' | 'admin'>('chat');
   const [adminSubTab, setAdminSubTab] = useState<'settings' | 'keys' | 'conversations'>('settings');
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -93,15 +95,18 @@ export default function App() {
   // Admin dynamic control parameters
   const [newKey, setNewKey] = useState('');
   const [editedWelcome, setEditedWelcome] = useState('');
+  const [editedProfileImageUrl, setEditedProfileImageUrl] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [uploadingProfile, setUploadingProfile] = useState(false);
 
   // PWA progressive installation trigger
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [pwaInstallable, setPwaInstallable] = useState(false);
+  const [showPwaGuide, setShowPwaGuide] = useState(false);
 
   // Auto scroll reference
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const isCreatingInitialRef = useRef(false);
 
   // Monitor Auth Changes
   useEffect(() => {
@@ -112,7 +117,7 @@ export default function App() {
       if (firebaseUser) {
         // Enforce the admin list check requested: Dalind1990@gmail.com or Dalinadjib169@gmail.com
         const email = firebaseUser.email || '';
-        const hasAdminAccess = ['dalind1990@gmail.com', 'dalinadjib169@gmail.com'].includes(email.toLowerCase());
+        const hasAdminAccess = ['dalind1990@gmail.com', 'dalinadjib169@gmail.com', 'dalinadjib1990@gmail.com'].includes(email.toLowerCase());
         setIsAdmin(hasAdminAccess);
         if (hasAdminAccess) {
           setActiveTab('admin'); // auto-navigate to admin if they are the teacher
@@ -154,12 +159,22 @@ export default function App() {
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as GlobalSettings;
+        const currentMsg = data.welcomeMessage || '';
+        
+        // Auto-upgrade if database holds the old placeholder words
+        if (currentMsg.includes('مرحبا بيك خويا') || currentMsg.includes('كيفاش نقدر نساعدك') || !currentMsg.trim()) {
+          setDoc(docRef, {
+            welcomeMessage: DEFAULT_WELCOME
+          }, { merge: true }).catch(err => console.log('[MIGRATION] Firestore welcome message auto-upgrade skipped:', err));
+        }
+
         setGlobalSettings({
           profileImageUrl: data.profileImageUrl || DEFAULT_AVATAR,
           welcomeMessage: data.welcomeMessage || DEFAULT_WELCOME,
           geminiKeys: data.geminiKeys || []
         });
         setEditedWelcome(data.welcomeMessage || DEFAULT_WELCOME);
+        setEditedProfileImageUrl(data.profileImageUrl || DEFAULT_AVATAR);
       } else {
         // Bootstrap global placeholder settings
         setDoc(docRef, {
@@ -186,7 +201,7 @@ export default function App() {
       orderBy('lastMessageAt', 'desc')
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
       const list: ChatSession[] = [];
       snapshot.forEach((docSnap) => {
         list.push({ id: docSnap.id, ...docSnap.data() } as ChatSession);
@@ -194,8 +209,37 @@ export default function App() {
       setSessions(list);
       
       // Auto-select latest active chat session if none selected
-      if (list.length > 0 && !activeSessionId) {
-        setActiveSessionId(list[0].id);
+      if (list.length > 0) {
+        if (!activeSessionId) {
+          setActiveSessionId(list[0].id);
+        }
+      } else {
+        // Automatically bootstrap the very first chat session with Professor Dali's welcome message
+        if (!isCreatingInitialRef.current) {
+          isCreatingInitialRef.current = true;
+          try {
+            const docRef = await addDoc(collection(db, 'sessions'), {
+              userId: user.uid,
+              userEmail: user.email,
+              title: `المساعد التعليمي - المعلم DZ 💡`,
+              createdAt: new Date().toISOString(),
+              lastMessageAt: new Date().toISOString()
+            });
+            
+            // Seed first message with Professor Dali's welcome message
+            await addDoc(collection(db, `sessions/${docRef.id}/messages`), {
+              sender: 'teacher',
+              text: globalSettings.welcomeMessage || DEFAULT_WELCOME,
+              createdAt: new Date().toISOString()
+            });
+            
+            setActiveSessionId(docRef.id);
+          } catch (e) {
+            console.error("Error creating initial auto-session:", e);
+          } finally {
+            isCreatingInitialRef.current = false;
+          }
+        }
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, path);
@@ -327,14 +371,6 @@ export default function App() {
     e.preventDefault();
     if ((!inputText.trim() && !attachedImageUrl) || aiResponding) return;
 
-    const currentSession = activeSessionId || viewingSessionId;
-    if (!currentSession && user) {
-      // automatically create session first
-      alert("يرجى الضغط على زر (+ محادثة جديدة) قبل البدء في الكتابة.");
-      return;
-    }
-
-    const sessionToUse = currentSession!;
     const textToSend = inputText;
     const imgToSend = attachedImageUrl;
 
@@ -342,7 +378,37 @@ export default function App() {
     setAttachedImageUrl(null);
     setAiResponding(true);
 
+    let sessionToUse = activeSessionId || viewingSessionId;
+
     try {
+      if (!sessionToUse && user) {
+        // Automatically bootstrap a brand new session/room
+        const path = 'sessions';
+        const docRef = await addDoc(collection(db, path), {
+          userId: user.uid,
+          userEmail: user.email,
+          title: textToSend.substring(0, 30) + (textToSend.length > 30 ? '...' : ''),
+          createdAt: new Date().toISOString(),
+          lastMessageAt: new Date().toISOString()
+        });
+        
+        // Seed first message with Al-Moalem's welcome message
+        const msgPath = `sessions/${docRef.id}/messages`;
+        await addDoc(collection(db, msgPath), {
+          sender: 'teacher',
+          text: globalSettings.welcomeMessage,
+          createdAt: new Date().toISOString()
+        });
+
+        sessionToUse = docRef.id;
+        setActiveSessionId(docRef.id);
+      }
+
+      if (!sessionToUse) {
+        setAiResponding(false);
+        return;
+      }
+
       // 1. Add student message to Firestore
       const msgPath = `sessions/${sessionToUse}/messages`;
       await addDoc(collection(db, msgPath), {
@@ -418,6 +484,108 @@ export default function App() {
     }
   };
 
+  // Handle students submitting function inquiries from the "Function Study Corner"
+  const handleAskDaliFromCorner = async (promptText: string) => {
+    if (!user) {
+      alert("الرجاء تسجيل الدخول أولاً لطرح أسئلة على الأستاذ دالي 🇩🇿");
+      return;
+    }
+
+    // Direct students to the chat tab
+    setActiveTab('chat');
+    setAiResponding(true);
+
+    try {
+      let sessionToUse = activeSessionId || viewingSessionId;
+
+      // 1. If no active session exists, bootstrap a brand new chat room first
+      if (!sessionToUse) {
+        const path = 'sessions';
+        const docRef = await addDoc(collection(db, path), {
+          userId: user.uid,
+          userEmail: user.email,
+          title: `دراسة دالة - ${new Date().toLocaleDateString('ar-DZ')}`,
+          createdAt: new Date().toISOString(),
+          lastMessageAt: new Date().toISOString()
+        });
+
+        // Seed with Al-Moalem's welcome message
+        const msgPath = `sessions/${docRef.id}/messages`;
+        await addDoc(collection(db, msgPath), {
+          sender: 'teacher',
+          text: globalSettings.welcomeMessage,
+          createdAt: new Date().toISOString()
+        });
+
+        sessionToUse = docRef.id;
+        setActiveSessionId(docRef.id);
+      }
+
+      // 2. Add user question to Firestore
+      const msgPath = `sessions/${sessionToUse}/messages`;
+      await addDoc(collection(db, msgPath), {
+        sender: 'student',
+        text: promptText,
+        imageUrl: '',
+        createdAt: new Date().toISOString()
+      });
+
+      // Update session lastMessageAt timestamp and title to "دراسة دالة"
+      await setDoc(doc(db, 'sessions', sessionToUse), {
+        lastMessageAt: new Date().toISOString(),
+        title: `دراسة دالة بالتفصيل 📈`
+      }, { merge: true });
+
+      autoScrollToBottom();
+
+      // 3. Assemble history with the new prompt
+      const recentHistory = [{
+        sender: 'student',
+        text: promptText,
+        imageUrl: ''
+      }];
+
+      // 4. Send command directly to Gemini Proxy
+      const aiResponse = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messages: recentHistory,
+          welcomeMessageOverride: globalSettings.welcomeMessage
+        })
+      });
+
+      if (aiResponse.ok) {
+        const data = await aiResponse.json();
+        const teacherText = data.text;
+
+        await addDoc(collection(db, msgPath), {
+          sender: 'teacher',
+          text: teacherText,
+          createdAt: new Date().toISOString()
+        });
+
+        await setDoc(doc(db, 'sessions', sessionToUse), {
+          lastMessageAt: new Date().toISOString()
+        }, { merge: true });
+      } else {
+        const errData = await aiResponse.json();
+        await addDoc(collection(db, msgPath), {
+          sender: 'teacher',
+          text: `بارك الله فيك بني، يبدو أن هناك مشكلة حالية مع مفاتيح البرمجة: ${errData.error || 'عطل تقني'}. صلي على محمد و عاونا بدعوة خير.`,
+          createdAt: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error('Error in AI function study corner query:', error);
+    } finally {
+      setAiResponding(false);
+      autoScrollToBottom();
+    }
+  };
+
   // Delete chat row
   const handleDeleteSession = async (sid: string) => {
     if (!confirm('هل تريد فعلاً حذف هذه المحادثة بالكامل؟')) return;
@@ -448,12 +616,9 @@ export default function App() {
 
       if (response.ok) {
         const data = await response.json();
-        // Update Firestore Global Settings
-        await setDoc(doc(db, 'settings', 'global'), {
-          profileImageUrl: data.secure_url
-        }, { merge: true });
-        
-        alert('تم تغيير صورة بروفيل الأستاذ دالي بنجاح!');
+        // Update local state to preview
+        setEditedProfileImageUrl(data.secure_url);
+        alert('تم رفع الصورة الجديدة بنجاح! للإنهاء يرجى الضغط على زر "حفظ تعديلات صورة البروفيل" أدناه 💾.');
       } else {
         alert('فشل رفع صورة بروفيل الأستاذ دالي.');
       }
@@ -462,6 +627,27 @@ export default function App() {
       alert('عطل في الاتصال بخوادم Cloudinary.');
     } finally {
       setUploadingProfile(false);
+    }
+  };
+
+  // Admin: Explicitly save global profile picture URL to Firestore
+  const handleSaveProfileImage = async () => {
+    setSavingSettings(true);
+    try {
+      if (!editedProfileImageUrl.trim()) {
+        alert('يرجى إدخال رابط صورة صحيح أولاً.');
+        return;
+      }
+      await setDoc(doc(db, 'settings', 'global'), {
+        profileImageUrl: editedProfileImageUrl.trim(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      alert('تم حفظ واعتماد صورة بروفيل الأستاذ دالي بنجاح! 🇩🇿✨');
+    } catch (err) {
+      console.error(err);
+      alert('فشل في حفظ صورة بروفيل الأستاذ.');
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -535,100 +721,126 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#080d19] text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-white" dir="rtl">
+    <div className="min-h-screen bg-[#080d19] text-slate-100 flex flex-col font-sans selection:bg-blue-500 selection:text-white" dir="rtl">
       
       {/* Top Banner containing Algerian teacher credentials and install indicators */}
-      <header className="bg-[#0b132a]/95 border-b border-emerald-950/70 p-4 sticky top-0 z-40 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-3">
+      <header className="bg-[#0b132a]/95 border-b border-blue-500/20 p-3 md:p-4 sticky top-0 z-40 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
           
-          <div className="flex items-center gap-3">
-            {/* Algerian Flag beside Dali Teacher's Photo as explicitly requested: "علم جزائري بجانب صورتي 🇩🇿" */}
-            <div className="relative">
-              <img 
-                src={globalSettings.profileImageUrl} 
-                alt="الأستاذ دالي" 
-                className="w-12 h-12 rounded-full border-2 border-emerald-500 object-cover shadow-lg shadow-emerald-500/10"
-                onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
-              />
-              <span className="absolute -bottom-1 -right-1 text-base bg-[#080d1a] px-0.5 py-0.2 rounded-md border border-slate-800 shadow shadow-slate-950">
-                🇩🇿
-              </span>
-            </div>
-            
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-lg text-emerald-400">المعلم DZ</span>
-                <span className="text-[10px] bg-emerald-900/30 text-emerald-300 font-medium px-2 py-0.5 rounded-full border border-emerald-500/20">الأستاذ دالي</span>
+          <div className="flex items-center justify-between w-full md:w-auto gap-3">
+            <div className="flex items-center gap-3">
+              {/* Algerian Flag beside Dali Teacher's Photo as explicitly requested: "علم جزائري بجانب صورتي 🇩🇿" */}
+              <div className="relative shrink-0">
+                <img 
+                  src={globalSettings.profileImageUrl} 
+                  alt="الأستاذ دالي" 
+                  className="w-12 h-12 rounded-full border-2 border-blue-500 object-cover shadow-lg shadow-blue-500/10"
+                  onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
+                />
+                <span className="absolute -bottom-1 -right-1 text-base bg-[#080d1a] px-0.5 py-0.2 rounded-md border border-slate-800 shadow shadow-slate-950">
+                  🇩🇿
+                </span>
               </div>
-              <p className="text-xs text-slate-400 font-light mt-0.5">مساعد ذكاء اصطناعي تفاعلي مدروس لجميع الطلاب</p>
+              
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-base md:text-lg text-blue-400">المعلم DZ</span>
+                  <span className="text-[10px] bg-blue-900/40 text-blue-300 font-medium px-2 py-0.5 rounded-full border border-blue-500/20">الأستاذ دالي</span>
+                </div>
+                <p className="text-xs text-slate-400 font-light mt-0.5">مساعد ذكاء اصطناعي تفاعلي مدروس لجميع الطلاب</p>
+              </div>
+            </div>
+
+            {/* Mobile Actions: Install & Auth right next to logo to prevent wraps */}
+            <div className="flex items-center gap-1.5 md:hidden shrink-0">
+              <button
+                onClick={triggerPwaInstallation}
+                className="p-1.5 text-blue-400 hover:text-blue-300 bg-blue-950/40 rounded-lg border border-blue-900/30 transition shadow-inner shadow-blue-500/10"
+                title="تثبيت تطبيق المعلم DZ الأستاذ دالي"
+              >
+                <Download className="h-4 w-4 animate-bounce" />
+              </button>
+              {user ? (
+                <button
+                  onClick={logoutUser}
+                  title="تسجيل الخروج"
+                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/20 rounded-lg border border-slate-800 transition"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={signInWithGoogle}
+                  className="px-2 py-1.5 text-[10px] font-bold bg-blue-600 text-white rounded-lg transition"
+                >
+                  دخول
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            
-            {/* PWA Direct standalone Installation Button exactly as requested: "تثبيت مباشر من زر تثبيت مثل تطبيقات" */}
-            {pwaInstallable && (
-              <button
-                onClick={triggerPwaInstallation}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg transition-all shadow-md shadow-emerald-600/20 border border-emerald-500 animate-pulse"
-              >
-                <Download className="h-4 w-4" />
-                <span>تثبيت التطبيق 📱</span>
-              </button>
-            )}
-
-            {/* Navigation links */}
+          {/* Navigation links & Actions layout */}
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
             {user && (
-              <div className="flex items-center gap-1 bg-[#0b132a] p-1 rounded-lg border border-slate-800">
+              <div className="flex items-center gap-1 bg-[#091124] p-1 rounded-xl border border-slate-800/80 w-full sm:w-auto justify-center overflow-x-auto overflow-y-hidden scrollbar-none shrink-0">
+                <button
+                  onClick={() => setActiveTab('functions')}
+                  className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap ${activeTab === 'functions' ? 'bg-blue-600 text-white shadow shadow-blue-500/20' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  <span>دراسة الدوال 📈</span>
+                </button>
                 <button
                   onClick={() => setActiveTab('chat')}
-                  className={`flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-md transition-all ${activeTab === 'chat' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap ${activeTab === 'chat' ? 'bg-blue-600 text-white shadow shadow-blue-500/20' : 'text-slate-400 hover:text-slate-200'}`}
                 >
-                  <MessageSquare className="h-3 w-3" />
+                  <MessageSquare className="h-3.5 w-3.5" />
                   <span>المحادثات</span>
                 </button>
                 {isAdmin && (
                   <button
                     onClick={() => setActiveTab('admin')}
-                    className={`flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-md transition-all ${activeTab === 'admin' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap ${activeTab === 'admin' ? 'bg-blue-600 text-white shadow shadow-blue-500/20' : 'text-slate-400 hover:text-slate-200'}`}
                   >
-                    <Settings className="h-3 w-3" />
+                    <Settings className="h-3.5 w-3.5" />
                     <span>لوحة التحكم 🛠️</span>
                   </button>
                 )}
               </div>
             )}
 
-            {/* Account authentication buttons */}
-            {user ? (
+            {/* Desktop only active actions */}
+            <div className="hidden md:flex items-center gap-2">
               <button
-                onClick={logoutUser}
-                title="تسجيل الخروج"
-                className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/20 rounded-lg border border-slate-800 transition"
+                onClick={triggerPwaInstallation}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-xl transition-all shadow-md shadow-blue-600/30 border border-blue-500 hover:scale-105"
+                title="تثبيت التطبيق مباشرة"
               >
-                <LogOut className="h-4 w-4" />
+                <Download className="h-4 w-4 animate-bounce" />
+                <span>تثبيت التطبيق 📱</span>
               </button>
-            ) : (
-              <button
-                onClick={signInWithGoogle}
-                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-50 text-white hover:text-blue-900 rounded-lg transition-all shadow-md border border-blue-500"
-              >
-                <LogIn className="h-4 w-4" />
-                <span>دخول الطلاب / الأستاذ</span>
-              </button>
-            )}
 
+              {user && (
+                <button
+                  onClick={logoutUser}
+                  title="تسجيل الخروج"
+                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/20 rounded-lg border border-slate-800 transition"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </div>
 
         </div>
       </header>
 
       {/* Main Container screen */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col min-h-0">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col min-h-0 lg:h-[calc(100vh-90px)] lg:max-h-[calc(100vh-90px)] overflow-hidden">
         
         {authLoading ? (
           <div className="flex-1 flex flex-col items-center justify-center p-12">
-            <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             <p className="mt-4 text-sm text-slate-400">جاري تحميل منصة الأستاذ دالي... صلي على محمد</p>
           </div>
         ) : !user ? (
@@ -638,15 +850,15 @@ export default function App() {
             <img 
               src={globalSettings.profileImageUrl} 
               alt="المعلم دالي" 
-              className="w-32 h-32 rounded-full border-4 border-emerald-500 object-cover mb-4 shadow-xl shadow-emerald-500/20"
+              className="w-32 h-32 rounded-full border-4 border-blue-500 object-cover mb-4 shadow-xl shadow-blue-500/20"
               onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
             />
             
-            <h2 className="text-2xl md:text-3xl font-extrabold text-emerald-400 tracking-tight">مرحباً بكم في منصة "المعلم DZ"</h2>
+            <h2 className="text-2xl md:text-3xl font-extrabold text-blue-400 tracking-tight">مرحباً بكم في منصة "المعلم DZ"</h2>
             <p className="text-xs text-slate-400 mt-1 font-mono">بإشراف وبرمجة الأستاذ دالي نجيب لذكاء اصطناعي تفاعلي مدروس</p>
             
-            <div className="mt-6 bg-[#0c152a] p-5 rounded-2xl border border-emerald-950/50 text-right space-y-3">
-              <span className="text-xs text-emerald-500 font-bold block">🌟 ميزات تطبيق الأستاذ دالي:</span>
+            <div className="mt-6 bg-[#0c152a] p-5 rounded-2xl border border-blue-950/50 text-right space-y-3">
+              <span className="text-xs text-blue-400 font-bold block">🌟 ميزات تطبيق الأستاذ دالي:</span>
               <ul className="text-xs text-slate-300 space-y-2 list-disc list-inside">
                 <li>إجابات أكاديمية دقيقة وتدريجية في كافة المجالات ومادة الرياضيات.</li>
                 <li>أسلوب جزائري وطني أصيل يحمل في طياته الصلاة على محمد ﷺ.</li>
@@ -658,7 +870,7 @@ export default function App() {
 
             <button
               onClick={signInWithGoogle}
-              className="mt-8 flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition-all shadow-lg shadow-emerald-600/10 border border-emerald-500"
+              className="mt-8 flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-all shadow-lg shadow-blue-600/10 border border-blue-500"
             >
               <LogIn className="h-5 w-5" />
               <span>ابدأ الدراسة الآن (دخول بحساب جوجل)</span>
@@ -679,7 +891,7 @@ export default function App() {
                   <span className="text-xs font-bold text-slate-400">محادثاتي الدراسية</span>
                   <button
                     onClick={createNewChatRoom}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-emerald-950 text-emerald-400 hover:bg-emerald-900 rounded-lg border border-emerald-900 transition"
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-blue-950 text-blue-400 hover:bg-blue-900 rounded-lg border border-blue-900 transition"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>محادثة جديدة</span>
@@ -699,12 +911,12 @@ export default function App() {
                         }}
                         className={`group flex items-center justify-between p-2.5 rounded-lg text-xs cursor-pointer transition ${
                           activeSessionId === sess.id 
-                            ? 'bg-emerald-900/40 border border-emerald-800/60 text-emerald-300' 
+                            ? 'bg-blue-900/40 border border-blue-800/60 text-blue-300' 
                             : 'bg-[#060a14]/60 hover:bg-[#0c1328] border border-transparent text-slate-300'
                         }`}
                       >
                         <div className="flex items-center gap-2 overflow-hidden">
-                          <MessageSquare className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <MessageSquare className="w-4 h-4 text-blue-500 shrink-0" />
                           <span className="truncate">{sess.title}</span>
                         </div>
                         <button
@@ -735,7 +947,7 @@ export default function App() {
                 <div className="flex-1 flex flex-col min-h-0">
                   
                   {/* Active Chat Header */}
-                  <div className="bg-[#0b132a] p-3 border-b border-emerald-950/50 flex items-center justify-between gap-2">
+                  <div className="bg-[#0b132a] p-3 border-b border-blue-950/50 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => setDrawerOpen(!drawerOpen)}
@@ -748,22 +960,33 @@ export default function App() {
                         <img 
                           src={globalSettings.profileImageUrl} 
                           alt="المعلم دالي" 
-                          className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
+                          className="w-10 h-10 rounded-full border border-blue-500 object-cover"
                           onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
                         />
                         <div>
                           <span className="text-xs font-bold text-slate-100 block">الأستاذ دالي نجيب 🇩🇿</span>
-                          <span className="text-[10px] text-emerald-500 flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span className="text-[10px] text-blue-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
                             نشط بالذكاء الاصطناعي المتقدم
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="text-xs text-slate-400 flex items-center gap-1.5 font-mono">
-                      <Clock className="w-3.5 h-3.5 text-emerald-500" />
-                      أسلوب أكاديمي تدرجي مبرمج
+                    <div className="flex items-center gap-2">
+                      <div className="hidden md:flex items-center gap-1 text-[11px] text-slate-400 font-mono pl-2 border-l border-slate-800">
+                        <Clock className="w-3.5 h-3.5 text-blue-500" />
+                        <span>أسلوب أكاديمي تدرجي مبرمج</span>
+                      </div>
+                      <button
+                        onClick={() => setActiveTab('functions')}
+                        className="bg-blue-950/80 hover:bg-blue-900/80 text-blue-300 font-bold text-xs px-3 py-1.5 rounded-xl border border-blue-800/80 hover:border-blue-500/60 flex items-center gap-1.5 shadow-md shadow-blue-950/50 transition-all active:scale-95 hover:text-white"
+                        title="الانتقال إلى ركن دراسة الدوال التفاعلي"
+                      >
+                        <TrendingUp className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
+                        <span className="hidden sm:inline">ركن دراسة الدوال التفاعلي 📈</span>
+                        <span className="sm:hidden">دراسة الدوال 📈</span>
+                      </button>
                     </div>
                   </div>
 
@@ -771,7 +994,7 @@ export default function App() {
                   <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     {messages.length === 0 ? (
                       <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
-                        <Sparkles className="w-8 h-8 text-emerald-500 mb-2 animate-bounce" />
+                        <Sparkles className="w-8 h-8 text-blue-500 mb-2 animate-bounce" />
                         <span className="text-sm font-bold">ابدأ محادثة دراسية مع الأستاذ دالي!</span>
                         <p className="text-xs max-w-sm mt-1">اضغط على زر (محادثة جديدة) في القائمة الجانبية أو ابدأ الكتابة فوراً.</p>
                       </div>
@@ -789,7 +1012,7 @@ export default function App() {
                               <img 
                                 src={globalSettings.profileImageUrl} 
                                 alt="المعلم دالي" 
-                                className="w-8 h-8 rounded-full border border-emerald-500 object-cover"
+                                className="w-8 h-8 rounded-full border border-blue-500 object-cover"
                                 onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
                               />
                             ) : (
@@ -808,7 +1031,7 @@ export default function App() {
                             <div className={`p-3.5 rounded-2xl text-xs leading-relaxed ${
                               msg.sender === 'student' 
                                 ? 'bg-[#0f1d3a] text-slate-100 rounded-tr-none border border-slate-800' 
-                                : 'bg-[#0b132a] text-emerald-50 rounded-tl-none border border-slate-900/80 shadow'
+                                : 'bg-[#0b132a] text-blue-50 rounded-tl-none border border-slate-900/80 shadow'
                             }`}>
                               
                               {/* Display attached image parsed to Gemini */}
@@ -834,16 +1057,16 @@ export default function App() {
                           <img 
                             src={globalSettings.profileImageUrl} 
                             alt="المعلم دالي" 
-                            className="w-8 h-8 rounded-full border border-emerald-500 object-cover"
+                            className="w-8 h-8 rounded-full border border-blue-500 object-cover"
                           />
                         </div>
                         <div className="space-y-1">
                           <span className="text-[9px] text-slate-500 font-mono block">الأستاذ دالي يكتب...</span>
-                          <div className="bg-[#0b132a]/80 p-3 rounded-2xl rounded-tl-none border border-emerald-950/40 text-xs flex items-center gap-2 text-emerald-400">
+                          <div className="bg-[#0b132a]/80 p-3 rounded-2xl rounded-tl-none border border-blue-950/40 text-xs flex items-center gap-2 text-blue-400">
                             <div className="flex gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping delay-75"></span>
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping delay-150"></span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping"></span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping delay-75"></span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping delay-150"></span>
                             </div>
                             <span>صلي على محمد و انتظرني دقيقة بني...</span>
                           </div>
@@ -855,7 +1078,7 @@ export default function App() {
 
                   {/* Attachment indicator bar */}
                   {attachedImageUrl && (
-                    <div className="px-4 py-2 bg-[#0c152a] border-t border-emerald-950/30 flex items-center justify-between gap-2">
+                    <div className="px-4 py-2 bg-[#0c152a] border-t border-blue-950/30 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <img src={attachedImageUrl} alt="مرفق تحميل" className="w-10 h-10 object-cover rounded-lg border border-slate-700" />
                         <span className="text-[10px] text-slate-400">صورة مرفقة جاهزة للإرسال والتحليل الذكي للأستاذ دالي 📸</span>
@@ -873,7 +1096,7 @@ export default function App() {
                   <form onSubmit={handleSendMessage} className="p-3 bg-[#0b132a]/60 border-t border-slate-900 flex items-center gap-2">
                     
                     {/* Cloudinary picture attachment exactly as specified: "ارسال صور ذكاء اصطناعي لتحايلها نستعمل doaxziqm7 nadjib dali" */}
-                    <label className="shrink-0 p-2.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-950/20 rounded-xl border border-slate-800 transition cursor-pointer relative">
+                    <label className="shrink-0 p-2.5 text-slate-400 hover:text-blue-400 hover:bg-blue-950/20 rounded-xl border border-slate-800 transition cursor-pointer relative">
                       <input 
                         type="file" 
                         accept="image/*" 
@@ -884,7 +1107,7 @@ export default function App() {
                       <ImageIcon className="w-4.5 h-4.5" />
                       {uploadingImage && (
                         <span className="absolute inset-0 bg-slate-950/90 rounded-xl flex items-center justify-center">
-                          <span className="w-3 h-3 border border-emerald-500 border-t-transparent rounded-full animate-spin"></span>
+                          <span className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin"></span>
                         </span>
                       )}
                     </label>
@@ -899,13 +1122,13 @@ export default function App() {
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
                       disabled={aiResponding}
-                      className="flex-1 bg-[#060a14] border border-slate-800 focus:border-emerald-700/80 px-4 py-2.5 rounded-xl text-xs outline-none focus:ring-1 focus:ring-emerald-700/30 transition text-slate-100 placeholder-slate-600"
+                      className="flex-1 bg-[#060a14] border border-slate-800 focus:border-blue-700/80 px-4 py-2.5 rounded-xl text-xs outline-none focus:ring-1 focus:ring-blue-700/30 transition text-slate-100 placeholder-slate-600"
                     />
 
                     <button
                       type="submit"
                       disabled={(!inputText.trim() && !attachedImageUrl) || aiResponding}
-                      className="p-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold rounded-xl transition"
+                      className="p-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold rounded-xl transition"
                     >
                       <Send className="w-4 h-4" />
                     </button>
@@ -914,14 +1137,24 @@ export default function App() {
                 </div>
               )}
 
+              {/* FUNCTIONS STUDY CORNER GRAPHING PLOTTER & ANALYZER */}
+              {activeTab === 'functions' && (
+                <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-3 md:p-5 bg-[#060a14]">
+                  <FunctionStudyCorner 
+                    userEmail={user?.email}
+                    onAskDali={handleAskDaliFromCorner} 
+                  />
+                </div>
+              )}
+
               {/* ADMIN CONTROL PANEL SECTOR (SECURED STRICTLY BY DIRECT RULE EMAIL CHECKS FOR TWO SPECIFIED USERS) */}
               {activeTab === 'admin' && (
                 <div className="flex-1 flex flex-col min-h-0 bg-[#070c1a]">
                   
                   {/* Dashboard header and tab options */}
-                  <div className="bg-[#0b132a] p-4 border-b border-emerald-950/50 flex flex-col md:flex-row items-center justify-between gap-3">
+                  <div className="bg-[#0b132a] p-4 border-b border-blue-950/50 flex flex-col md:flex-row items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <LayoutDashboard className="w-5 h-5 text-emerald-500 animate-pulse" />
+                      <LayoutDashboard className="w-5 h-5 text-blue-500 animate-pulse" />
                       <div>
                         <span className="text-sm font-bold text-slate-100">لوحة التحكم الآمنة - الأستاذ دالي نجيب</span>
                         <p className="text-[10px] text-slate-400">مرحباً بك أستاذنا الفاضل. تحكم ببروفايلك ومفاتيح API بموثوقية عالية.</p>
@@ -931,21 +1164,21 @@ export default function App() {
                     <div className="flex gap-1">
                       <button
                         onClick={() => setAdminSubTab('settings')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${adminSubTab === 'settings' ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${adminSubTab === 'settings' ? 'bg-blue-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'}`}
                       >
                         <Upload className="w-3.5 h-3.5" />
                         <span>بروفيل الأستاذ</span>
                       </button>
                       <button
                         onClick={() => setAdminSubTab('keys')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${adminSubTab === 'keys' ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${adminSubTab === 'keys' ? 'bg-blue-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'}`}
                       >
                         <Key className="w-3.5 h-3.5" />
                         <span>المفاتيح و Rotation 🔄</span>
                       </button>
                       <button
                         onClick={() => setAdminSubTab('conversations')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${adminSubTab === 'conversations' ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${adminSubTab === 'conversations' ? 'bg-blue-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'}`}
                       >
                         <MessageSquare className="w-3.5 h-3.5" />
                         <span>متابعة الطلبة ({studentSessions.length})</span>
@@ -962,31 +1195,58 @@ export default function App() {
                         
                         {/* Profile Image Cloudinary file upload exactly as requested: "نبدل فطو بروفيل تاعي... nadjib dali doaxziqm7" */}
                         <div className="bg-[#0b132a] p-5 rounded-2xl border border-slate-800 space-y-4">
-                          <h3 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                          <h3 className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
                             <ImageIcon className="w-4 h-4" />
                             <span>تغيير صورة بروفيل الأستاذ دالي نجيب (تُحمل على Cloudinary)</span>
                           </h3>
-                          <div className="flex flex-col md:flex-row items-center gap-4">
-                            <img 
-                              src={globalSettings.profileImageUrl} 
-                              alt="صورة الأستاذ" 
-                              className="w-24 h-24 rounded-full border-2 border-emerald-500 object-cover shadow shadow-emerald-500/10"
-                            />
-                            <div className="space-y-2">
-                              <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-all shadow-md cursor-pointer">
-                                <Upload className="w-4 h-4" />
-                                <span>رفع صورة جديدة للأستاذ</span>
+                          <div className="flex flex-col md:flex-row items-center gap-5">
+                            <div className="relative">
+                              <img 
+                                src={editedProfileImageUrl || globalSettings.profileImageUrl} 
+                                alt="معاينة صورة الأستاذ" 
+                                className="w-24 h-24 rounded-full border-2 border-blue-500 object-cover shadow-lg shadow-blue-500/10"
+                                onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
+                              />
+                              <span className="absolute bottom-0 right-0 text-[9px] bg-slate-900 border border-slate-700 px-1 py-0.5 rounded text-slate-300">
+                                {editedProfileImageUrl !== globalSettings.profileImageUrl ? 'معدلة' : 'الحالية'}
+                              </span>
+                            </div>
+                            <div className="flex-1 space-y-3 w-full">
+                              <div className="flex flex-col md:flex-row gap-2 w-full">
+                                <label className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-all shadow-md cursor-pointer select-none">
+                                  <Upload className="w-4 h-4" />
+                                  <span>رفع صورة جديدة للأستاذ</span>
+                                  <input 
+                                    type="file" 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                    onChange={handleProfileImageUpload}
+                                    disabled={uploadingProfile}
+                                  />
+                                </label>
+                                
+                                <button
+                                  onClick={handleSaveProfileImage}
+                                  disabled={savingSettings || uploadingProfile}
+                                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-all shadow-md"
+                                >
+                                  <CheckCircle className="w-4 h-4" />
+                                  <span>حفظ واعتماد صورة البروفيل 💾</span>
+                                </button>
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-slate-400 block font-semibold">رابط صورة البروفيل المفتوحة (يمكنك تعديل الرابط أو الرفع):</span>
                                 <input 
-                                  type="file" 
-                                  accept="image/*" 
-                                  className="hidden" 
-                                  onChange={handleProfileImageUpload}
-                                  disabled={uploadingProfile}
+                                  type="text"
+                                  value={editedProfileImageUrl}
+                                  onChange={(e) => setEditedProfileImageUrl(e.target.value)}
+                                  className="w-full bg-[#060a14] border border-slate-800 focus:border-blue-500 px-3 py-1.5 rounded text-xs select-all text-slate-300 font-mono outline-none"
+                                  placeholder="رابط الصورة المرفوعة..."
                                 />
-                              </label>
-                              <p className="text-[10px] text-slate-400">موصول بـ Cloudinary: doaxziqm7 والمجلد nadjib dali.</p>
+                              </div>
+                              <p className="text-[10px] text-slate-500">موصول بـ Cloudinary: doaxziqm7 والمجلد nadjib dali.</p>
                               {uploadingProfile && (
-                                <span className="text-[11px] text-emerald-400 block animate-pulse">جاري رفع وحفظ الصورة الجديدة... صلي على محمد</span>
+                                <span className="text-[11px] text-blue-400 block animate-pulse font-medium">جاري رفع وحفظ الصورة الجديدة... صلي على محمد</span>
                               )}
                             </div>
                           </div>
@@ -994,19 +1254,19 @@ export default function App() {
 
                         {/* Welcome Message Customizer */}
                         <div className="bg-[#0b132a] p-5 rounded-2xl border border-slate-800 space-y-3">
-                          <h3 className="text-xs font-bold text-emerald-400">تعديل رسالة الترحيب الأولى للطلبة</h3>
+                          <h3 className="text-xs font-bold text-blue-400">تعديل رسالة الترحيب الأولى للطلبة</h3>
                           <textarea
                             value={editedWelcome}
                             onChange={(e) => setEditedWelcome(e.target.value)}
                             rows={3}
                             placeholder="اكتب رسالة الترحيب التي ينطق بها الأستاذ للطلبة..."
-                            className="w-full bg-[#060a14] border border-slate-800 focus:border-emerald-500 p-3 rounded-lg text-xs text-slate-200 outline-none transition"
+                            className="w-full bg-[#060a14] border border-slate-800 focus:border-blue-500 p-3 rounded-lg text-xs text-slate-200 outline-none transition"
                           />
                           <div className="flex justify-end">
                             <button
                               onClick={handleSaveWelcomeMessage}
                               disabled={savingSettings}
-                              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition"
+                              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition"
                             >
                               <CheckCircle className="w-4 h-4" />
                               <span>تحديث وحفظ رسالة الترحيب</span>
@@ -1021,7 +1281,7 @@ export default function App() {
                     {adminSubTab === 'keys' && (
                       <div className="max-w-2xl mx-auto space-y-5">
                         <div className="bg-[#0b132a] p-5 rounded-2xl border border-slate-800 space-y-4">
-                          <h3 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                          <h3 className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
                             <Key className="w-4 h-4" />
                             <span>نظام دوران مفاتيح Google Gemini API الذكي (Rotations)</span>
                           </h3>
@@ -1035,11 +1295,11 @@ export default function App() {
                               placeholder="أدخل مفتاح Google Gemini API الجديد هنا..."
                               value={newKey}
                               onChange={(e) => setNewKey(e.target.value)}
-                              className="md:col-span-9 bg-[#060a14] border border-slate-800 focus:border-emerald-500 px-3 py-2 rounded-lg text-xs text-slate-100 outline-none transition font-mono"
+                              className="md:col-span-9 bg-[#060a14] border border-slate-800 focus:border-blue-500 px-3 py-2 rounded-lg text-xs text-slate-100 outline-none transition font-mono"
                             />
                             <button
                               onClick={handleAddGeminiKey}
-                              className="md:col-span-3 flex items-center justify-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition"
+                              className="md:col-span-3 flex items-center justify-center gap-1 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition"
                             >
                               <Plus className="w-4 h-4" />
                               <span>إضافة المفتاح</span>
@@ -1057,8 +1317,8 @@ export default function App() {
                                 {globalSettings.geminiKeys.map((k, index) => (
                                   <div key={index} className="flex items-center justify-between p-2.5 bg-[#060a14] rounded-lg border border-slate-800 text-xs">
                                     <div className="flex items-center gap-2">
-                                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                                      <span className="font-mono text-[10px] text-emerald-400 font-bold">المفتاح #{index + 1} (مخفي ومحمي على السيرفر)</span>
+                                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                                      <span className="font-mono text-[10px] text-blue-400 font-bold">المفتاح #{index + 1} (مخفي ومحمي على السيرفر)</span>
                                     </div>
                                     <span className="text-[10px] bg-slate-900 border border-slate-800 text-slate-400 px-2.5 py-1 rounded">نشط بالدوران</span>
                                   </div>
@@ -1096,10 +1356,10 @@ export default function App() {
                                     setActiveSessionId(null);
                                     setActiveTab('chat'); // go view details index
                                   }}
-                                  className="p-3 bg-[#060a14] rounded-lg border border-slate-800 hover:border-emerald-700/60 transition cursor-pointer text-xs space-y-2"
+                                  className="p-3 bg-[#060a14] rounded-lg border border-slate-800 hover:border-blue-700/60 transition cursor-pointer text-xs space-y-2"
                                 >
                                   <div className="flex items-center justify-between gap-1">
-                                    <span className="font-bold text-emerald-400 truncate">{sess.userEmail}</span>
+                                    <span className="font-bold text-blue-400 truncate">{sess.userEmail}</span>
                                     <span className="text-[9px] text-slate-500 shrink-0 font-mono">
                                       {new Date(sess.lastMessageAt).toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' })}
                                     </span>
@@ -1107,7 +1367,7 @@ export default function App() {
                                   <div className="text-slate-300 font-bold truncate">{sess.title}</div>
                                   <div className="flex items-center justify-between gap-1 pt-1 border-t border-slate-900 text-[10px] text-slate-400">
                                     <span>محادثة: #{sess.id.substring(0, 6)}</span>
-                                    <span className="text-emerald-500 hover:underline flex items-center gap-0.5 font-bold">
+                                    <span className="text-blue-400 hover:underline flex items-center gap-0.5 font-bold">
                                       دخول للمتابعة
                                       <ExternalLink className="w-3 h-3" />
                                     </span>
@@ -1132,16 +1392,93 @@ export default function App() {
       </main>
 
       {/* Main Footer markup */}
-      <footer className="bg-[#0b132a]/90 border-t border-emerald-950/40 p-3 text-center text-[11px] text-slate-400">
+      <footer className="bg-[#0b132a]/90 border-t border-blue-950/40 p-3 text-center text-[11px] text-slate-400">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-2">
           <span>المساعد التعليمي "المعلم DZ" - الأستاذ دالي نجيب 🇩🇿</span>
-          <span className="font-mono text-[10px] text-emerald-500 font-semibold flex items-center gap-1">
+          <span className="font-mono text-[10px] text-blue-400 font-semibold flex items-center gap-1">
             <span>صلي على محمد ﷺ</span>
             <span>●</span>
             <span>لا تنسونا من صالح دعائكم 🤲</span>
           </span>
         </div>
       </footer>
+
+      {/* PWA Direct Installation Guide Modal */}
+      {showPwaGuide && (
+        <div className="fixed inset-0 bg-[#040812]/85 backdrop-blur-md z-50 flex items-center justify-center p-4" dir="rtl">
+          <div className="bg-[#0b132a] border border-blue-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* Close button */}
+            <button 
+              onClick={() => setShowPwaGuide(false)}
+              className="absolute top-4 left-4 text-slate-400 hover:text-white bg-slate-900/60 p-1.5 rounded-lg border border-slate-800 transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Header / Logo */}
+            <div className="text-center space-y-2 mt-2">
+              <div className="relative inline-block">
+                <img 
+                  src="https://res.cloudinary.com/doaxziqm7/image/upload/v1716912345/almoalem_pwa_icon_512.png" 
+                  alt="شعار المعلم DZ" 
+                  className="w-16 h-16 mx-auto rounded-2xl border-2 border-blue-500 shadow-lg shadow-blue-500/20"
+                />
+                <span className="absolute -bottom-1 -right-1 text-xs bg-slate-900 border border-slate-800 px-1 py-0.2 rounded-md">🇩🇿</span>
+              </div>
+              <h3 className="text-lg font-bold text-blue-400">تثبيت تطبيق "المعلم DZ"</h3>
+              <p className="text-[11px] text-slate-400">تابع دراستك التفاعلية كبرنامج مستقل وسريع على هاتفك أو حاسوبك دون شريط المتصفح!</p>
+            </div>
+
+            {/* Instruction blocks */}
+            <div className="mt-5 space-y-3 text-xs">
+              
+              {/* Android & Chrome */}
+              <div className="bg-[#070c1a] p-3 rounded-xl border border-slate-900 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-blue-300">
+                  <span className="text-base">🤖</span>
+                  <span>هواتف أندرويد ومتصفح كـروم:</span>
+                </div>
+                <p className="text-slate-400 leading-relaxed pr-6">
+                  إذا كان متصفحك يدعم التثبيت الفوري، فسيظهر لك نافذة منبثقة الآن. بخلاف ذلك، اضغط على زر خيارات المتصفح (المزيد) ثم اختر <strong className="text-slate-200">"تثبيت التطبيق"</strong> أو <strong className="text-slate-200">"إضافة للشاشة الرئيسية"</strong>.
+                </p>
+              </div>
+
+              {/* iOS / Safari */}
+              <div className="bg-[#070c1a] p-3 rounded-xl border border-slate-900 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-blue-300">
+                  <span className="text-base">🍎</span>
+                  <span>هواتف آيـفـون وآيـبـادا (Safari):</span>
+                </div>
+                <p className="text-slate-400 leading-relaxed pr-6">
+                  اضغط على زر المشاركة <strong className="text-blue-400">📤</strong> الموجود في شريط الأدوات بالأسفل، ثم مرر لأسفل واختر <strong className="text-slate-200">"إضافة إلى الشاشة الرئيسية" (Add to Home Screen)</strong> ➕ لتثبيته فوراً.
+                </p>
+              </div>
+
+              {/* Computers */}
+              <div className="bg-[#070c1a] p-3 rounded-xl border border-slate-900 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-blue-300">
+                  <span className="text-base">💻</span>
+                  <span>أجهزة الكمبيوتر والحاسوب:</span>
+                </div>
+                <p className="text-slate-400 leading-relaxed pr-6">
+                  انقر على أيقونة التثبيت <strong className="text-blue-400">🖥️ (شاشة التنزيل)</strong> التي تجدها في الزاوية العلوية لشريط العنوان بالمتصفح بجوار الرابط.
+                </p>
+              </div>
+
+            </div>
+
+            {/* Close footer button */}
+            <button
+              onClick={() => setShowPwaGuide(false)}
+              className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition shadow-md shadow-blue-600/10 border border-blue-500"
+            >
+              حسناً، فهمت الطريقة 💡
+            </button>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
