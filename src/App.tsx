@@ -211,6 +211,8 @@ export default function App() {
           console.error("Settings bootstrapping skipped due to privilege constraint. Using local placeholders.", err);
         });
       }
+    }, (error) => {
+      console.warn("Global settings fetch failed (possibly offline or initializing). Using defaults.", error);
     });
 
     return () => unsubscribe();
@@ -784,7 +786,7 @@ export default function App() {
                 className="p-1.5 text-blue-400 hover:text-blue-300 bg-blue-950/40 rounded-lg border border-blue-900/30 transition shadow-inner shadow-blue-500/10 hover:scale-105 active:scale-95"
                 title="تثبيت تطبيق المعلم DZ الأستاذ دالي"
               >
-                <Download className="h-4 w-4 text-blue-400 animate-pulse" />
+                <Download className="h-4 w-4 text-blue-400" />
               </button>
               {user ? (
                 <button
@@ -806,7 +808,7 @@ export default function App() {
           </div>
 
           {/* Navigation links & Actions layout */}
-          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          <div className={`${user ? 'flex' : 'hidden md:flex'} flex-col sm:flex-row items-center gap-3 w-full md:w-auto`}>
             {user && (
               <div className="flex items-center gap-1 bg-[#091124] p-1 rounded-xl border border-slate-800/80 w-full sm:w-auto justify-center overflow-x-auto overflow-y-hidden scrollbar-none shrink-0">
                 <button
@@ -842,7 +844,7 @@ export default function App() {
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-xl transition-all shadow-md shadow-blue-600/30 border border-blue-500 hover:scale-[1.03]"
                 title="تثبيت التطبيق مباشرة"
               >
-                <Download className="h-4 w-4 text-white animate-pulse" />
+                <Download className="h-4 w-4 text-white" />
                 <span>تثبيت التطبيق 📱</span>
               </button>
 
