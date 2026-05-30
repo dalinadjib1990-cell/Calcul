@@ -15,6 +15,7 @@ let appInstance;
 if (!admin.apps.length) {
   try {
     appInstance = admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
       projectId: firebaseConfig.projectId
     });
     console.log('Firebase Admin initialized for project:', firebaseConfig.projectId);
@@ -53,8 +54,13 @@ async function getRotatedApiKey(): Promise<string> {
         return selectedKey;
       }
     }
-  } catch (error) {
-    console.error('Error in getRotatedApiKey fetching settings/private:', error);
+  } catch (error: any) {
+    const errorStr = String(error);
+    if (errorStr.includes('PERMISSION_DENIED') || error?.code === 7) {
+      console.log('[KEY ROTATION] Administrative Firestore access is restricted in this environment; falling back safely to default key.');
+    } else {
+      console.error('Error in getRotatedApiKey fetching settings/private:', error);
+    }
   }
   
   // Fallback to primary env key
