@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper utilities
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && 
+        (request.auth.token.email == "dalind1990@gmail.com" || 
+         request.auth.token.email == "dalinadjib169@gmail.com");
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // 1. Settings Collection
+    match /settings/global {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /settings/private {
+      allow read, write: if isAdmin();
+    }
+
+    // 2. Chat Sessions Collection
+    match /sessions/{sessionId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      allow create: if isSignedIn() && 
+        isValidId(sessionId) &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.userEmail == request.auth.token.email;
+
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // 3. Sub-collection: Chat Messages
+    match /sessions/{sessionId}/messages/{messageId} {
+      function getSessionData() {
+        return get(/databases/$(database)/documents/sessions/$(sessionId)).data;
+      }
+
+      allow read, list: if isSignedIn() && 
+        (getSessionData().userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() && 
+        isValidId(sessionId) && 
+        isValidId(messageId) &&
+        (getSessionData().userId == request.auth.uid || isAdmin());
+
+      allow update, delete: if isAdmin();
+    }
+  }
+}

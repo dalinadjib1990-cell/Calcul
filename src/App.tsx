@@ -1,1764 +1,1147 @@
 /**
- * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useRef, MouseEvent } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
-  Calculator as CalculatorIcon, 
-  TrendingUp, 
-  Scale, 
+  auth, 
+  db, 
+  signInWithGoogle, 
+  logoutUser, 
+  OperationType, 
+  handleFirestoreError 
+} from './lib/firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  onSnapshot, 
+  query, 
+  where, 
+  orderBy, 
+  addDoc,
+  serverTimestamp,
+  deleteDoc
+} from 'firebase/firestore';
+import { 
+  MessageSquare, 
+  Send, 
+  Image as ImageIcon, 
+  Sparkles, 
+  Trash2, 
+  Plus, 
+  LogOut, 
+  LogIn, 
+  Download, 
+  Settings, 
+  Key, 
   BookOpen, 
-  Undo,
-  Trash2,
-  Copy,
-  Check,
-  Type,
+  LayoutDashboard,
+  ShieldAlert,
   HelpCircle,
-  Moon,
-  Sun,
-  Layers,
-  ArrowRightLeft,
+  Menu,
   X,
-  Plus
+  Upload,
+  CheckCircle,
+  Clock,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { parseAndEvaluate } from './utils/mathParser';
-import { SCIENTIFIC_CONSTANTS } from './constantsData';
-import { UNIT_CATEGORIES, convertUnits } from './unitsData';
-import { HistoryItem } from './types';
+import { ChatSession, ChatMessage, GlobalSettings } from './types';
 
-// Localization maps for fully bilingual support
-const LOCALIZATION = {
-  ar: {
-    title: 'الآلة الحاسبة العلمية الذكية',
-    subtitle: 'منصة حسابية وهندسية متكاملة للعمليات المعقدة، التمثيل البياني، وتحويل القياسات',
-    tabCalculator: 'الحاسبة العلمية',
-    tabGraph: 'الرسام الهندسي f(x)',
-    tabConverter: 'محول محترف للوحدات',
-    tabConstants: 'قائمة الثوابت الفيزيائية',
-    historyTitle: 'سجل العمليات الحسابية',
-    historyEmpty: 'السجل فارغ تماماً. قم بإجراء حسابات لتبدأ!',
-    clearHistory: 'إفراغ السجل',
-    inputPlaceholder: 'اكتب التعبير أو استخدم لوحة الأزرار الحسابية...',
-    liveResult: 'الجواب التلقائي المباشر',
-    angleMode: 'نظام قياس الزوايا',
-    degree: 'الدرجات (DEG)',
-    radian: 'الراديان (RAD)',
-    memoryActive: 'الذاكرة نشطة (M)',
-    memoryValue: 'قيمة الذاكرة الحالية',
-    insertConstant: 'إدراج في شاشة الحاسبة',
-    inserted: 'تم النقل!',
-    categoryPhysics: 'الفيزياء والكونيات',
-    categoryChemistry: 'الكيمياء والمواد',
-    categoryMath: 'الرياضيات والهندسة',
-    searchPlaceholder: 'ابحث عن الثوابت (مثال: Planck, Speed)...',
-    unitCategory: 'اختر فئة القياس الفيزيائي',
-    unitValue: 'المقدار المدخل',
-    unitResult: 'المقدار المحول المرادف',
-    graphFunction: 'المعادلة المستهدفة f(x)',
-    graphPlaceholder: 'اكتب الدالة الرياضية هنا، مثل: x^2 - 4 أو sin(x)',
-    graphZoomIn: 'تقريب للمركز (+)',
-    graphZoomOut: 'تبعيد للمنظور (-)',
-    graphReset: 'إعادة ضبط المحاور',
-    errorInvalid: 'تعبير رياضي غير منطقي أو غير مكتمل الدلالة',
-    btnEvaluate: 'حساب (=)',
-    btnClear: 'تصفير (AC)',
-    btnDelete: 'مسح خلفي (DEL)',
-    insertedLabel: 'تم نسخ القيمة أو إدراجها بنجاح!',
-    infoBtn: 'دليل استخدام صياغة المعادلات الحسابية المكتوبة',
-    guideTitle: 'كيفية كتابة المعادلات والعمليات العلمية',
-    guideClose: 'إغلاق الدليل',
-    guideMathNote: 'يمكنك كتابة المعادلات بحرية تامة باستخدام لوحة مفاتيح حاسوبك وبصورة طبيعية:',
-    backspace: 'مسح',
-    angle: 'زاوية',
-    physics: 'فيزياء',
-    chemistry: 'كيمياء',
-    math: 'رياضيات',
-    search: 'بحث',
-    copy: 'نسخ النتيجة',
-    copiedStatus: 'تم النسخ!',
-    graphSettings: 'إعدادات نطاق الرسام',
-    xRange: 'نطاق محور السينات (X)',
-    yRange: 'نطاق محور الصادات (Y)',
-    from: 'من',
-    to: 'إلى',
-    apply: 'تطبيق التعديلات',
-    unsupportedGraph: 'حدث خطأ في تقييم المنحنى البياني للدالة المكتوبة f(x). يرجى التحقق من الصيغة.'
-  },
-  en: {
-    title: 'Smart Scientific Calculator',
-    subtitle: 'Integrated physical engine for scientific calculations, interactive graphing, and conversions.',
-    tabCalculator: 'Scientific Pad',
-    tabGraph: 'Interactive Plotter',
-    tabConverter: 'Unit Converter',
-    tabConstants: 'Scientific Constants',
-    historyTitle: 'Calculation History',
-    historyEmpty: 'History is empty. Solve expressions to start!',
-    clearHistory: 'Clear History',
-    inputPlaceholder: 'Enter mathematical expression, e.g. 2 * sin(pi / 6)...',
-    liveResult: 'Live Evaluator',
-    angleMode: 'Angle Reference Unit',
-    degree: 'Degrees (DEG)',
-    radian: 'Radians (RAD)',
-    memoryActive: 'Memory Active (M)',
-    memoryValue: 'Stored Value',
-    insertConstant: 'Insert into activepad',
-    inserted: 'Inserted!',
-    categoryPhysics: 'Physics & Cosmos',
-    categoryChemistry: 'Chemistry & Materials',
-    categoryMath: 'Math & Geometry',
-    searchPlaceholder: 'Search constants (e.g. Planck, Euler)...',
-    unitCategory: 'Measurement Category',
-    unitValue: 'Source magnitude',
-    unitResult: 'Converted magnitude value',
-    graphFunction: 'Plotted Equation f(x)',
-    graphPlaceholder: 'Type coordinate function, e.g. x^2 - 4 or sin(x)',
-    graphZoomIn: 'Zoom In (+)',
-    graphZoomOut: 'Zoom Out (-)',
-    graphReset: 'Reset Axes',
-    errorInvalid: 'Syntax Error or incomplete expression',
-    btnEvaluate: 'Evaluate (=)',
-    btnClear: 'Clear All (AC)',
-    btnDelete: 'Backspace (DEL)',
-    insertedLabel: 'Successfully copied or inserted value!',
-    infoBtn: 'Expression Writing Guide',
-    guideTitle: 'How to write scientific expressions',
-    guideClose: 'Close Guide',
-    guideMathNote: 'You can write mathematical formulations freely using your standard physical keyboard:',
-    backspace: 'DEL',
-    angle: 'Angle',
-    physics: 'Physics',
-    chemistry: 'Chemistry',
-    math: 'Math',
-    search: 'Search',
-    copy: 'Copy Result',
-    copiedStatus: 'Copied!',
-    graphSettings: 'Graph Bounds Configuration',
-    xRange: 'X-Axis Range limits',
-    yRange: 'Y-Axis Range limits',
-    from: 'From',
-    to: 'To',
-    apply: 'Apply Bounds',
-    unsupportedGraph: 'The graphing engine encountered an evaluation error. Check function syntax.'
-  }
-};
+// Default teacher profile avatar (Algerian colors / theme) if none is configured
+const DEFAULT_AVATAR = "https://res.cloudinary.com/doaxziqm7/image/upload/v1716912345/almoalem_placeholder.png";
+const DEFAULT_WELCOME = "مرحبا بيك خويا اختي انا الاستاذ دالي استاذ مادة رياضيات و مبرمج بذكاء اصطناعي كيفاش نقدر نساعدك";
 
 export default function App() {
-  const [lang, setLang] = useState<'ar' | 'en'>('ar');
-  const t = LOCALIZATION[lang];
-  const isRTL = lang === 'ar';
+  // Authentication & Users State
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'calculator' | 'graph' | 'converter' | 'constants'>('calculator');
-  const [isRadian, setIsRadian] = useState<boolean>(true);
-  const [expression, setExpression] = useState<string>('');
-  const [liveValue, setLiveValue] = useState<string>('');
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [history, setHistory] = useState<HistoryItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('ai_studio_calc_history');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
+  // Layout UI navigation
+  const [activeTab, setActiveTab] = useState<'chat' | 'admin'>('chat');
+  const [adminSubTab, setAdminSubTab] = useState<'settings' | 'keys' | 'conversations'>('settings');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Global app settings (synced via Firestore settings/global)
+  const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({
+    profileImageUrl: DEFAULT_AVATAR,
+    welcomeMessage: DEFAULT_WELCOME,
+    geminiKeys: []
   });
 
-  // Guide Dialog State
-  const [showGuide, setShowGuide] = useState(false);
+  // Student list (loaded for admins, to inspect student chat rooms)
+  const [studentSessions, setStudentSessions] = useState<ChatSession[]>([]);
+  const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
 
-  // Clipboard Copied Dialog State
-  const [showCopiedBadge, setShowCopiedBadge] = useState<string | null>(null);
+  // Chat/Session tracking for current student OR selected student under review
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
 
-  // Clipboard copies
-  const triggerCopyStatus = (id: string) => {
-    setShowCopiedBadge(id);
-    setTimeout(() => {
-      setShowCopiedBadge(null);
-    }, 2000);
+  // New prompt input states
+  const [inputText, setInputText] = useState('');
+  const [attachedImageUrl, setAttachedImageUrl] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [aiResponding, setAiResponding] = useState(false);
+
+  // Admin dynamic control parameters
+  const [newKey, setNewKey] = useState('');
+  const [editedWelcome, setEditedWelcome] = useState('');
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [uploadingProfile, setUploadingProfile] = useState(false);
+
+  // PWA progressive installation trigger
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [pwaInstallable, setPwaInstallable] = useState(false);
+
+  // Auto scroll reference
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Monitor Auth Changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      setAuthLoading(false);
+      
+      if (firebaseUser) {
+        // Enforce the admin list check requested: Dalind1990@gmail.com or Dalinadjib169@gmail.com
+        const email = firebaseUser.email || '';
+        const hasAdminAccess = ['dalind1990@gmail.com', 'dalinadjib169@gmail.com'].includes(email.toLowerCase());
+        setIsAdmin(hasAdminAccess);
+        if (hasAdminAccess) {
+          setActiveTab('admin'); // auto-navigate to admin if they are the teacher
+        } else {
+          setActiveTab('chat');
+        }
+      } else {
+        setIsAdmin(false);
+        setActiveTab('chat');
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Sync PWA setup events
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setPwaInstallable(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const triggerPwaInstallation = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log('[PWA] User response:', outcome);
+    setDeferredPrompt(null);
+    setPwaInstallable(false);
   };
 
-  // Memory Cell State
-  const [memoryValue, setMemoryValue] = useState<number | null>(() => {
-    try {
-      const saved = localStorage.getItem('ai_studio_calc_memory');
-      return saved ? parseFloat(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  // Scientific Constants Tab State
-  const [searchConstant, setSearchConstant] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<'all' | 'physics' | 'chemistry' | 'math'>('all');
-
-  // Unit Converter State
-  const [unitCategory, setUnitCategory] = useState<string>('length');
-  const [unitFrom, setUnitFrom] = useState<string>('m');
-  const [unitTo, setUnitTo] = useState<string>('km');
-  const [unitValueFrom, setUnitValueFrom] = useState<string>('1000');
-  const [unitValueTo, setUnitValueTo] = useState<string>('1');
-
-  // Graph state
-  const [graphEquation, setGraphEquation] = useState<string>('x^2 - 4');
-  const [xMin, setXMin] = useState<number>(-10);
-  const [xMax, setXMax] = useState<number>(10);
-  const [yMin, setYMin] = useState<number>(-10);
-  const [yMax, setYMax] = useState<number>(10);
-  const [graphPointTrace, setGraphPointTrace] = useState<{ x: number; y: number; px: number; py: number } | null>(null);
-  const [graphError, setGraphError] = useState<boolean>(false);
-
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  // Sync unit values
+  // Sync Global Settings
   useEffect(() => {
-    const category = UNIT_CATEGORIES.find(c => c.id === unitCategory);
-    if (category && category.units.length >= 2) {
-      setUnitFrom(category.units[0].id);
-      setUnitTo(category.units[1].id);
-    }
-  }, [unitCategory]);
-
-  useEffect(() => {
-    const val = parseFloat(unitValueFrom);
-    if (!isNaN(val)) {
-      const result = convertUnits(val, unitFrom, unitTo, unitCategory);
-      if (!isNaN(result)) {
-        // Round to reasonable accuracy limits to look clean
-        setUnitValueTo(parseFloat(result.toFixed(8)).toString());
+    const docRef = doc(db, 'settings', 'global');
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as GlobalSettings;
+        setGlobalSettings({
+          profileImageUrl: data.profileImageUrl || DEFAULT_AVATAR,
+          welcomeMessage: data.welcomeMessage || DEFAULT_WELCOME,
+          geminiKeys: data.geminiKeys || []
+        });
+        setEditedWelcome(data.welcomeMessage || DEFAULT_WELCOME);
       } else {
-        setUnitValueTo('');
+        // Bootstrap global placeholder settings
+        setDoc(docRef, {
+          profileImageUrl: DEFAULT_AVATAR,
+          welcomeMessage: DEFAULT_WELCOME,
+          geminiKeys: []
+        }).catch(err => {
+          console.error("Settings bootstrapping skipped due to privilege constraint. Using local placeholders.", err);
+        });
       }
-    } else {
-      setUnitValueTo('');
-    }
-  }, [unitValueFrom, unitFrom, unitTo, unitCategory]);
+    });
 
-  // Handle calculator evaluation in real-time "live mode"
+    return () => unsubscribe();
+  }, []);
+
+  // Sync Logged-In Student Chats
   useEffect(() => {
-    if (!expression || expression.trim() === '') {
-      setLiveValue('');
-      setErrorMessage('');
+    if (!user || isAdmin) return;
+
+    const path = 'sessions';
+    const q = query(
+      collection(db, path),
+      where('userId', '==', user.uid),
+      orderBy('lastMessageAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: ChatSession[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as ChatSession);
+      });
+      setSessions(list);
+      
+      // Auto-select latest active chat session if none selected
+      if (list.length > 0 && !activeSessionId) {
+        setActiveSessionId(list[0].id);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
+
+    return () => unsubscribe();
+  }, [user, isAdmin]);
+
+  // Sync Admin Conversations (View conversations of ALL students)
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+
+    const path = 'sessions';
+    const q = query(
+      collection(db, path),
+      orderBy('lastMessageAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: ChatSession[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as ChatSession);
+      });
+      setStudentSessions(list);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
+
+    return () => unsubscribe();
+  }, [user, isAdmin]);
+
+  // Sync Chat Messages in the chosen active chat
+  useEffect(() => {
+    const currentSession = activeSessionId || viewingSessionId;
+    if (!currentSession) {
+      setMessages([]);
       return;
     }
-    try {
-      const result = parseAndEvaluate(expression, isRadian);
-      if (isNaN(result)) {
-        setLiveValue('');
-      } else {
-        setLiveValue(parseFloat(result.toFixed(10)).toString());
-        setErrorMessage('');
-      }
-    } catch {
-      setLiveValue('');
-    }
-  }, [expression, isRadian]);
 
-  // Synchronize history in localStorage
-  useEffect(() => {
-    localStorage.setItem('ai_studio_calc_history', JSON.stringify(history));
-  }, [history]);
+    setMessagesLoading(true);
+    const path = `sessions/${currentSession}/messages`;
+    const q = query(
+      collection(db, path),
+      orderBy('createdAt', 'asc')
+    );
 
-  // Synchronize memory in localStorage
-  useEffect(() => {
-    if (memoryValue !== null) {
-      localStorage.setItem('ai_studio_calc_memory', memoryValue.toString());
-    } else {
-      localStorage.removeItem('ai_studio_calc_memory');
-    }
-  }, [memoryValue]);
-
-  // Drawing the custom coordinates system graph
-  useEffect(() => {
-    if (activeTab !== 'graph' || !canvasRef.current) return;
-    const canvas = canvasRef.current;
-    
-    // Fit to container width and height nicely
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * devicePixelRatio;
-    canvas.height = rect.height * devicePixelRatio;
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.scale(devicePixelRatio, devicePixelRatio);
-    
-    const width = rect.width;
-    const height = rect.height;
-    
-    // Clear backplane to cozy slate details
-    ctx.fillStyle = '#0f172a'; // slate-900 background
-    ctx.fillRect(0, 0, width, height);
-    
-    // Render secondary grid indicators
-    ctx.strokeStyle = '#334155'; // slate-700 grid lines
-    ctx.lineWidth = 0.5;
-    ctx.fillStyle = '#94a3b8'; // slate-400 ticks Text
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    
-    // Calculate grid intervals
-    const xInterval = (xMax - xMin) / 10;
-    const yInterval = (yMax - yMin) / 10;
-    
-    // Convert mathematical coordinates to canvas pixel space
-    const toPx = (xVal: number) => ((xVal - xMin) / (xMax - xMin)) * width;
-    const toPy = (yVal: number) => height - ((yVal - yMin) / (yMax - yMin)) * height;
-    
-    // Convert canvas pixels back to coordinates
-    const toCoordX = (pxVal: number) => xMin + (pxVal / width) * (xMax - xMin);
-    
-    // 1. Draw helper grid coordinate grids
-    // Vertical dashed grids
-    for (let i = 0; i <= 10; i++) {
-      const currentX = xMin + i * xInterval;
-      const px = toPx(currentX);
-      ctx.beginPath();
-      ctx.moveTo(px, 0);
-      ctx.lineTo(px, height);
-      ctx.stroke();
-      
-      // Horizontal coordinate value labels
-      if (Math.abs(currentX) > 1e-10) {
-        ctx.fillText(parseFloat(currentX.toFixed(2)).toString(), px, height - 12);
-      }
-    }
-    
-    // Horizontal grids
-    for (let j = 0; j <= 10; j++) {
-      const currentY = yMin + j * yInterval;
-      const py = toPy(currentY);
-      ctx.beginPath();
-      ctx.moveTo(0, py);
-      ctx.lineTo(width, py);
-      ctx.stroke();
-      
-      // Vertical labels
-      if (Math.abs(currentY) > 1e-10) {
-        ctx.fillText(parseFloat(currentY.toFixed(2)).toString(), 15, py);
-      }
-    }
-    
-    // 2. Draw prominent Origin Axes
-    ctx.strokeStyle = '#f1f5f9'; // slate-100 thick axes
-    ctx.lineWidth = 1.5;
-    
-    // Y-Axis where X = 0
-    const zeroX = toPx(0);
-    if (zeroX >= 0 && zeroX <= width) {
-      ctx.beginPath();
-      ctx.moveTo(zeroX, 0);
-      ctx.lineTo(zeroX, height);
-      ctx.stroke();
-    }
-    
-    // X-Axis where Y = 0
-    const zeroY = toPy(0);
-    if (zeroY >= 0 && zeroY <= height) {
-      ctx.beginPath();
-      ctx.moveTo(0, zeroY);
-      ctx.lineTo(width, zeroY);
-      ctx.stroke();
-    }
-    
-    // Draw origin text label
-    ctx.fillText('0', zeroX + 8, zeroY + 8);
-    
-    // 3. Render Equation Polynomial/Trigonometric Curve
-    ctx.strokeStyle = '#38bdf8'; // sky-400 beautiful glowing blue line
-    ctx.lineWidth = 2.5;
-    ctx.shadowBlur = 4;
-    ctx.shadowColor = '#0284c7';
-    ctx.beginPath();
-    
-    let pathStarted = false;
-    let hasEvaluationError = false;
-    
-    // Plot column by column (pixel granularity) for perfect accuracy
-    for (let px = 0; px < width; px++) {
-      const xVal = toCoordX(px);
-      try {
-        const yVal = parseAndEvaluate(graphEquation, isRadian, xVal);
-        if (isNaN(yVal) || !isFinite(yVal)) {
-          pathStarted = false;
-          continue;
-        }
-        
-        const py = toPy(yVal);
-        
-        // Ensure standard range safety to avoid canvas drawing overflow artifacts
-        if (py >= -200 && py <= height + 200) {
-          if (!pathStarted) {
-            ctx.moveTo(px, py);
-            pathStarted = true;
-          } else {
-            ctx.lineTo(px, py);
-          }
-        } else {
-          pathStarted = false;
-        }
-      } catch {
-        hasEvaluationError = true;
-      }
-    }
-    ctx.stroke();
-    ctx.shadowBlur = 0; // reset active shadow
-    
-    setGraphError(hasEvaluationError && graphEquation.length > 0);
-    
-    // 4. Draw tracer dot and coordinates overlays if mouse is hovering
-    if (graphPointTrace) {
-      ctx.strokeStyle = '#fb923c'; // orange-400 vertical tracker line
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(graphPointTrace.px, 0);
-      ctx.lineTo(graphPointTrace.px, height);
-      ctx.stroke();
-      
-      // Horizontal coordinate tracker guideline
-      ctx.beginPath();
-      ctx.moveTo(0, graphPointTrace.py);
-      ctx.lineTo(width, graphPointTrace.py);
-      ctx.stroke();
-      
-      ctx.setLineDash([]); // clear dash state
-      
-      // Glowing focal tracer dot
-      ctx.fillStyle = '#fb923c';
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#ea580c';
-      ctx.beginPath();
-      ctx.arc(graphPointTrace.px, graphPointTrace.py, 5, 0, 2 * Math.PI);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    }
-  }, [activeTab, graphEquation, xMin, xMax, yMin, yMax, graphPointTrace, isRadian]);
-
-  // Key pressed handler to support physical keyboard calculations
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Avoid intercepting keystrokes if typing inside text fields (like unit from values or search boxes)
-      const isFocusedOnTextField = document.activeElement && 
-        (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') && 
-        document.activeElement.id !== 'calc-expression-input';
-        
-      if (isFocusedOnTextField) return;
-
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleEvaluate();
-      } else if (e.key === 'Backspace') {
-        e.preventDefault();
-        handleDeleteChar();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        handleClearAll();
-      } else if ('0123456789.+-*/^%()'.includes(e.key)) {
-        e.preventDefault();
-        handleInsertText(e.key);
-      } else if (e.key === '!') {
-        e.preventDefault();
-        handleInsertText('!');
-      } else if (e.key === 'x' || e.key === 'X') {
-        e.preventDefault();
-        handleInsertText('x');
-      } else if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault();
-        handleInsertText('π');
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [expression, isRadian]);
-
-  // Function to insert text directly where cursor is focused
-  const handleInsertText = (text: string) => {
-    setExpression(prev => prev + text);
-    setErrorMessage('');
-    // Focus back on active display field
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
-  };
-
-  const handleDeleteChar = () => {
-    setExpression(prev => {
-      if (prev.length === 0) return '';
-      // Support backspace deleting nested function tokens completely
-      const functionsList = ['sin(', 'cos(', 'tan(', 'asin(', 'acos(', 'atan(', 'log(', 'ln(', 'sqrt(', 'cbrt(', 'abs(', 'exp('];
-      for (const f of functionsList) {
-        if (prev.endsWith(f)) {
-          return prev.slice(0, -f.length);
-        }
-      }
-      return prev.slice(0, -1);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: ChatMessage[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as ChatMessage);
+      });
+      setMessages(list);
+      setMessagesLoading(false);
+      autoScrollToBottom();
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+      setMessagesLoading(false);
     });
-    setErrorMessage('');
+
+    return () => unsubscribe();
+  }, [activeSessionId, viewingSessionId]);
+
+  const autoScrollToBottom = () => {
+    setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
   };
 
-  const handleClearAll = () => {
-    setExpression('');
-    setLiveValue('');
-    setErrorMessage('');
-  };
-
-  // Perform calculations and append log to local storage history
-  const handleEvaluate = () => {
-    if (!expression || expression.trim() === '') return;
+  // Create a brand new session/room
+  const createNewChatRoom = async () => {
+    if (!user) return;
     try {
-      const result = parseAndEvaluate(expression, isRadian);
-      if (isNaN(result)) {
-        setErrorMessage(t.errorInvalid);
+      const path = 'sessions';
+      const docRef = await addDoc(collection(db, path), {
+        userId: user.uid,
+        userEmail: user.email,
+        title: `محادثة جديدة - ${new Date().toLocaleDateString('ar-DZ')}`,
+        createdAt: new Date().toISOString(),
+        lastMessageAt: new Date().toISOString()
+      });
+      
+      // Seed first message with Al-Moalem's welcome message
+      const msgPath = `sessions/${docRef.id}/messages`;
+      await addDoc(collection(db, msgPath), {
+        sender: 'teacher',
+        text: globalSettings.welcomeMessage,
+        createdAt: new Date().toISOString()
+      });
+
+      setActiveSessionId(docRef.id);
+      setDrawerOpen(false);
+    } catch (error) {
+      console.error('Error creating new conversation:', error);
+    }
+  };
+
+  // Handle student uploading images to attach
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', 'nadjib dali'); // Using preset nadjib dali on cloud doaxziqm7 as specified
+
+      const response = await fetch('https://api.cloudinary.com/v1_1/doaxziqm7/image/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAttachedImageUrl(data.secure_url);
       } else {
-        const formattedResult = parseFloat(result.toFixed(12)).toString();
-        
-        // Append to calculations history stack
-        const newHistoryItem: HistoryItem = {
-          id: Date.now().toString(),
-          expression: expression,
-          result: formattedResult,
-          timestamp: new Date().toLocaleTimeString(lang === 'ar' ? 'ar-EG' : 'en-US', {
-            hour: '2-digit', minute: '2-digit', second: '2-digit'
-          }),
-          isRadian: isRadian,
-          isError: false
-        };
-        
-        setHistory(prev => [newHistoryItem, ...prev].slice(0, 50)); // limit to 50 logs max
-        setExpression(formattedResult);
-        setLiveValue('');
-        setErrorMessage('');
+        alert('حدث خطأ في رفع الصورة إلى Cloudinary. تأكد من إعدادات الرفع.');
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || t.errorInvalid);
+    } catch (err) {
+      console.error('Cloudinary Image upload error:', err);
+      alert('فشل الاتصال بخادم الصور Cloudinary.');
+    } finally {
+      setUploadingImage(false);
     }
   };
 
-  // Memory functions cell implementation
-  const handleMemoryStore = () => {
+  // Send Student Message & Query standard server-side AI response
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if ((!inputText.trim() && !attachedImageUrl) || aiResponding) return;
+
+    const currentSession = activeSessionId || viewingSessionId;
+    if (!currentSession && user) {
+      // automatically create session first
+      alert("يرجى الضغط على زر (+ محادثة جديدة) قبل البدء في الكتابة.");
+      return;
+    }
+
+    const sessionToUse = currentSession!;
+    const textToSend = inputText;
+    const imgToSend = attachedImageUrl;
+
+    setInputText('');
+    setAttachedImageUrl(null);
+    setAiResponding(true);
+
     try {
-      const result = parseAndEvaluate(expression || '0', isRadian);
-      if (!isNaN(result)) {
-        setMemoryValue(result);
-        triggerCopyStatus('memory-stored');
-      } else {
-        setErrorMessage(t.errorInvalid);
-      }
-    } catch {
-      setErrorMessage(t.errorInvalid);
-    }
-  };
+      // 1. Add student message to Firestore
+      const msgPath = `sessions/${sessionToUse}/messages`;
+      await addDoc(collection(db, msgPath), {
+        sender: 'student',
+        text: textToSend,
+        imageUrl: imgToSend || '',
+        createdAt: new Date().toISOString()
+      });
 
-  const handleMemoryRecall = () => {
-    if (memoryValue !== null) {
-      setExpression(prev => prev + memoryValue.toString());
-    }
-  };
+      // Update session lastMessageAt timestamp
+      await setDoc(doc(db, 'sessions', sessionToUse), {
+        lastMessageAt: new Date().toISOString(),
+        ...(textToSend ? { title: textToSend.substring(0, 30) + (textToSend.length > 30 ? '...' : '') } : {})
+      }, { merge: true });
 
-  const handleMemoryClear = () => {
-    setMemoryValue(null);
-  };
+      autoScrollToBottom();
 
-  const handleMemoryAdd = () => {
-    try {
-      const current = parseAndEvaluate(expression || '0', isRadian);
-      if (!isNaN(current)) {
-        setMemoryValue(prev => (prev || 0) + current);
-        triggerCopyStatus('memory-added');
-      }
-    } catch {
-      setErrorMessage(t.errorInvalid);
-    }
-  };
+      // 2. Load complete chat history for Gemini Proxy API
+      const historySnapSnap = await getDoc(doc(db, 'sessions', sessionToUse));
+      const messageToAI: any[] = [];
+      
+      // Let's reload messages manually or slice the local ones to provide context (limit to last 15 messages)
+      const currentMessagesList = [...messages, { sender: 'student', text: textToSend, imageUrl: imgToSend || '' }];
+      const recentHistory = currentMessagesList.slice(-12).map(m => ({
+        sender: m.sender,
+        text: m.text,
+        imageUrl: m.imageUrl
+      }));
 
-  const handleMemorySubtract = () => {
-    try {
-      const current = parseAndEvaluate(expression || '0', isRadian);
-      if (!isNaN(current)) {
-        setMemoryValue(prev => (prev || 0) - current);
-        triggerCopyStatus('memory-subbed');
-      }
-    } catch {
-      setErrorMessage(t.errorInvalid);
-    }
-  };
+      // 3. Request Gemini proxy on our backend server
+      const aiResponse = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messages: recentHistory,
+          welcomeMessageOverride: globalSettings.welcomeMessage
+        })
+      });
 
-  // Render canvas interactive mouse trackers
-  const handleCanvasMouseMove = (e: MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    
-    // Convert back from pixel width to coordinates
-    const toCoordX = (pxVal: number) => xMin + (pxVal / rect.width) * (xMax - xMin);
-    const toPy = (yVal: number) => rect.height - ((yVal - yMin) / (yMax - yMin)) * rect.height;
-    
-    const xCoordVal = toCoordX(mouseX);
-    try {
-      const yCoordVal = parseAndEvaluate(graphEquation, isRadian, xCoordVal);
-      if (!isNaN(yCoordVal) && isFinite(yCoordVal)) {
-        const py = toPy(yCoordVal);
-        setGraphPointTrace({
-          x: xCoordVal,
-          y: yCoordVal,
-          px: mouseX,
-          py: py
+      if (aiResponse.ok) {
+        const data = await aiResponse.json();
+        const teacherText = data.text;
+
+        // 4. Save AI response to Firestore
+        await addDoc(collection(db, msgPath), {
+          sender: 'teacher',
+          text: teacherText,
+          createdAt: new Date().toISOString()
         });
+
+        // Trigger session updated state again
+        await setDoc(doc(db, 'sessions', sessionToUse), {
+          lastMessageAt: new Date().toISOString()
+        }, { merge: true });
+
       } else {
-        setGraphPointTrace(null);
+        const errData = await aiResponse.json();
+        // Fallback error reply
+        await addDoc(collection(db, msgPath), {
+          sender: 'teacher',
+          text: `بارك الله فيك بني، يبدو أن هناك مشكلة حالية مع مفاتيح البرمجة: ${errData.error || 'عطل تقني'}. صلي على محمد و عاونا بدعوة خير.`,
+          createdAt: new Date().toISOString()
+        });
       }
-    } catch {
-      setGraphPointTrace(null);
+
+    } catch (error) {
+      console.error('Chat error:', error);
+    } finally {
+      setAiResponding(false);
+      autoScrollToBottom();
     }
   };
 
-  const handleCanvasMouseLeave = () => {
-    setGraphPointTrace(null);
+  // Delete chat row
+  const handleDeleteSession = async (sid: string) => {
+    if (!confirm('هل تريد فعلاً حذف هذه المحادثة بالكامل؟')) return;
+    try {
+      await deleteDoc(doc(db, 'sessions', sid));
+      if (activeSessionId === sid) setActiveSessionId(null);
+      if (viewingSessionId === sid) setViewingSessionId(null);
+    } catch (err) {
+      console.error('Error deleting session:', err);
+    }
   };
 
-  // Zoom utility triggers
-  const handleZoom = (factor: number) => {
-    const dx = (xMax - xMin) * factor;
-    const dy = (yMax - yMin) * factor;
+  // Admin: Change Global Al-Moalem profile picture via Cloudinary
+  const handleProfileImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingProfile(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', 'nadjib dali');
+
+      const response = await fetch('https://api.cloudinary.com/v1_1/doaxziqm7/image/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Update Firestore Global Settings
+        await setDoc(doc(db, 'settings', 'global'), {
+          profileImageUrl: data.secure_url
+        }, { merge: true });
+        
+        alert('تم تغيير صورة بروفيل الأستاذ دالي بنجاح!');
+      } else {
+        alert('فشل رفع صورة بروفيل الأستاذ دالي.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('عطل في الاتصال بخوادم Cloudinary.');
+    } finally {
+      setUploadingProfile(false);
+    }
+  };
+
+  // Admin: Update Global Welcome Message
+  const handleSaveWelcomeMessage = async () => {
+    setSavingSettings(true);
+    try {
+      await setDoc(doc(db, 'settings', 'global'), {
+        welcomeMessage: editedWelcome,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      alert('تم تحديث رسالة ترحيب المعلم دالي بنجاح!');
+    } catch (err) {
+      console.error(err);
+      alert('فشل حفظ رسالة ترحيب المعلم دالي.');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  // Admin: Add custom Gemini Key (saved securely to private settings)
+  const handleAddGeminiKey = async () => {
+    if (!newKey.trim()) return;
     
-    const xCenter = (xMin + xMax) / 2;
-    const yCenter = (yMin + yMax) / 2;
-    
-    setXMin(xCenter - dx / 2);
-    setXMax(xCenter + dx / 2);
-    setYMin(yCenter - dy / 2);
-    setYMax(yCenter + dy / 2);
-    setGraphPointTrace(null);
+    try {
+      const privateDocRef = doc(db, 'settings', 'private');
+      const privateSnap = await getDoc(privateDocRef);
+      
+      let currentKeys: string[] = [];
+      if (privateSnap.exists()) {
+        currentKeys = privateSnap.data().geminiKeys || [];
+      }
+      
+      const updatedKeys = [...currentKeys, newKey.trim()];
+      
+      await setDoc(privateDocRef, {
+        geminiKeys: updatedKeys,
+        updatedAt: new Date().toISOString()
+      });
+
+      // Update public stats representation (only counting keys without showing the actual key)
+      await setDoc(doc(db, 'settings', 'global'), {
+        geminiKeys: updatedKeys.map(() => 'CONFIGURED_KEY_MASKED'),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      setNewKey('');
+      alert('تمت إضافة مفتاح API جديد بنظام الدوران الدائري الآمن!');
+    } catch (err) {
+      console.error(err);
+      alert('فشل في حفظ مفتاح API الجديد.');
+    }
   };
 
-  const handleResetProjection = () => {
-    setXMin(-10);
-    setXMax(10);
-    setYMin(-10);
-    setYMax(10);
-    setGraphPointTrace(null);
+  // Admin: Clear and reset all custom API Gemini Keys
+  const handleResetAllKeys = async () => {
+    if (!confirm('هل تريد فعلاً إزالة كافة مفاتيح API المضافة والرجوع للافتراضي؟')) return;
+    try {
+      await setDoc(doc(db, 'settings', 'private'), {
+        geminiKeys: [],
+        updatedAt: new Date().toISOString()
+      });
+      await setDoc(doc(db, 'settings', 'global'), {
+        geminiKeys: [],
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      alert('تم تصفير مفاتيح API المضافة بنجاح.');
+    } catch (err) {
+      console.error(err);
+    }
   };
-
-  // Const search filter
-  const filteredConstants = SCIENTIFIC_CONSTANTS.filter(item => {
-    const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
-    const query = searchConstant.toLowerCase();
-    const matchesSearch = item.nameAr.toLowerCase().includes(query) || 
-                          item.nameEn.toLowerCase().includes(query) || 
-                          item.symbol.toLowerCase().includes(query);
-    return matchesCategory && matchesSearch;
-  });
 
   return (
-    <div className={`min-h-screen bg-slate-950 font-sans text-slate-100 antialiased selection:bg-sky-500 selection:text-white ${isRTL ? 'rtl' : 'ltr'}`}>
+    <div className="min-h-screen bg-[#080d19] text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-white" dir="rtl">
       
-      {/* Top Header Section */}
-      <header className="border-b border-slate-800 bg-slate-900/80 px-4 py-3 sticky top-0 z-40 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="bg-sky-600/35 p-2 rounded-lg border border-sky-500/50">
-              <CalculatorIcon className="h-6 w-6 text-sky-400" />
-            </div>
-            <div>
-              <h1 className="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-sky-300 via-sky-400 to-indigo-300">
-                {t.title}
-              </h1>
-              <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{t.subtitle}</p>
-            </div>
-          </div>
+      {/* Top Banner containing Algerian teacher credentials and install indicators */}
+      <header className="bg-[#0b132a]/95 border-b border-emerald-950/70 p-4 sticky top-0 z-40 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-3">
           
-          <div className="flex items-center gap-2">
-            {/* Guide Info Dialog Trigger */}
-            <button 
-              onClick={() => setShowGuide(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-300 border border-slate-700/80 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer"
-            >
-              <HelpCircle className="h-4 w-4 text-sky-400" />
-              <span>{t.infoBtn}</span>
-            </button>
-
-            {/* Language Selection Switcher */}
-            <button
-              onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}
-              className="px-3 py-1.5 text-xs font-bold leading-none select-none bg-slate-800 hover:bg-sky-950 border border-slate-700 rounded-lg text-sky-400 hover:text-sky-300 transition-all cursor-pointer focus:outline-none"
-            >
-              {lang === 'ar' ? 'English' : 'العربية'}
-            </button>
+          <div className="flex items-center gap-3">
+            {/* Algerian Flag beside Dali Teacher's Photo as explicitly requested: "علم جزائري بجانب صورتي 🇩🇿" */}
+            <div className="relative">
+              <img 
+                src={globalSettings.profileImageUrl} 
+                alt="الأستاذ دالي" 
+                className="w-12 h-12 rounded-full border-2 border-emerald-500 object-cover shadow-lg shadow-emerald-500/10"
+                onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
+              />
+              <span className="absolute -bottom-1 -right-1 text-base bg-[#080d1a] px-0.5 py-0.2 rounded-md border border-slate-800 shadow shadow-slate-950">
+                🇩🇿
+              </span>
+            </div>
+            
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-lg text-emerald-400">المعلم DZ</span>
+                <span className="text-[10px] bg-emerald-900/30 text-emerald-300 font-medium px-2 py-0.5 rounded-full border border-emerald-500/20">الأستاذ دالي</span>
+              </div>
+              <p className="text-xs text-slate-400 font-light mt-0.5">مساعد ذكاء اصطناعي تفاعلي مدروس لجميع الطلاب</p>
+            </div>
           </div>
+
+          <div className="flex items-center gap-2">
+            
+            {/* PWA Direct standalone Installation Button exactly as requested: "تثبيت مباشر من زر تثبيت مثل تطبيقات" */}
+            {pwaInstallable && (
+              <button
+                onClick={triggerPwaInstallation}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg transition-all shadow-md shadow-emerald-600/20 border border-emerald-500 animate-pulse"
+              >
+                <Download className="h-4 w-4" />
+                <span>تثبيت التطبيق 📱</span>
+              </button>
+            )}
+
+            {/* Navigation links */}
+            {user && (
+              <div className="flex items-center gap-1 bg-[#0b132a] p-1 rounded-lg border border-slate-800">
+                <button
+                  onClick={() => setActiveTab('chat')}
+                  className={`flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-md transition-all ${activeTab === 'chat' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  <MessageSquare className="h-3 w-3" />
+                  <span>المحادثات</span>
+                </button>
+                {isAdmin && (
+                  <button
+                    onClick={() => setActiveTab('admin')}
+                    className={`flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-md transition-all ${activeTab === 'admin' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    <Settings className="h-3 w-3" />
+                    <span>لوحة التحكم 🛠️</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Account authentication buttons */}
+            {user ? (
+              <button
+                onClick={logoutUser}
+                title="تسجيل الخروج"
+                className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/20 rounded-lg border border-slate-800 transition"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            ) : (
+              <button
+                onClick={signInWithGoogle}
+                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-50 text-white hover:text-blue-900 rounded-lg transition-all shadow-md border border-blue-500"
+              >
+                <LogIn className="h-4 w-4" />
+                <span>دخول الطلاب / الأستاذ</span>
+              </button>
+            )}
+
+          </div>
+
         </div>
       </header>
 
-      {/* Main App Container */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      {/* Main Container screen */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col min-h-0">
         
-        {/* Navigation Tab Menu */}
-        <div className="flex overflow-x-auto justify-start border-b border-slate-800 mb-6 pb-px gap-1 scrollbar-none">
-          <button
-            onClick={() => setActiveTab('calculator')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold transition-all shrink-0 border-b-2 cursor-pointer focus:outline-none ${
-              activeTab === 'calculator' 
-                ? 'border-sky-500 text-sky-400 bg-sky-500/5' 
-                : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-900/50'
-            }`}
-          >
-            <CalculatorIcon className="h-4 w-4" />
-            <span>{t.tabCalculator}</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('graph')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold transition-all shrink-0 border-b-2 cursor-pointer focus:outline-none ${
-              activeTab === 'graph' 
-                ? 'border-sky-500 text-sky-400 bg-sky-500/5' 
-                : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-900/50'
-            }`}
-          >
-            <TrendingUp className="h-4 w-4" />
-            <span>{t.tabGraph}</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('converter')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold transition-all shrink-0 border-b-2 cursor-pointer focus:outline-none ${
-              activeTab === 'converter' 
-                ? 'border-sky-500 text-sky-400 bg-sky-500/5' 
-                : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-900/50'
-            }`}
-          >
-            <Scale className="h-4 w-4" />
-            <span>{t.tabConverter}</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('constants')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold transition-all shrink-0 border-b-2 cursor-pointer focus:outline-none ${
-              activeTab === 'constants' 
-                ? 'border-sky-500 text-sky-400 bg-sky-500/5' 
-                : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-900/50'
-            }`}
-          >
-            <BookOpen className="h-4 w-4" />
-            <span>{t.tabConstants}</span>
-          </button>
-        </div>
-
-        {/* Tab Contents Frame */}
-        <div className="grid grid-cols-1 gap-6">
-          
-          {/* TAB 1: SCIENTIFIC CALCULATOR & HISTORY SPLIT SCREEN */}
-          {activeTab === 'calculator' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              
-              {/* Pad Frame */}
-              <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-                
-                {/* Visual Math Screens */}
-                <div className="bg-slate-950 p-6 border-b border-slate-800/80">
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500 font-mono mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded ${isRadian ? 'bg-sky-600/20 text-sky-400 border border-sky-500/30' : 'bg-slate-800 text-slate-400'}`}>
-                        RAD
-                      </span>
-                      <span className={`px-2 py-0.5 rounded ${!isRadian ? 'bg-sky-600/20 text-sky-400 border border-sky-500/30' : 'bg-slate-800 text-slate-400'}`}>
-                        DEG
-                      </span>
-                    </div>
-                    {memoryValue !== null && (
-                      <span className="bg-amber-500/10 text-amber-400 border border-amber-500/25 px-2 py-0.5 rounded animate-pulse">
-                        {t.memoryActive}: {parseFloat(memoryValue.toFixed(4))}
-                      </span>
-                    )}
-                  </div>
-                  
-                  {/* Native active writing output field */}
-                  <div className="relative">
-                    <input
-                      id="calc-expression-input"
-                      ref={inputRef}
-                      type="text"
-                      className="w-full bg-transparent text-right text-2xl md:text-3xl font-mono text-slate-100 placeholder-slate-700 border-none outline-none focus:ring-0 focus:outline-none p-0 ltr"
-                      placeholder={t.inputPlaceholder}
-                      value={expression}
-                      onChange={(e) => {
-                        setExpression(e.target.value);
-                        setErrorMessage('');
-                      }}
-                      dir="ltr"
-                    />
-                  </div>
-
-                  {/* Real-time calculated live result indicator */}
-                  <div className="h-8 mt-2 flex items-center justify-end font-mono text-slate-400 text-lg md:text-xl ltr truncate">
-                    {liveValue && (
-                      <span className="text-emerald-400 before:content-['≈_']">
-                        {liveValue}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Incomplete / Error indicator banner nested beautifully */}
-                  <div className="h-6 mt-1 flex items-center justify-end text-right">
-                    <AnimatePresence>
-                      {errorMessage && (
-                        <motion.span 
-                          initial={{ opacity: 0, y: -2 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          className="text-xs text-rose-400 font-medium bg-rose-500/10 px-2.5 py-0.5 rounded border border-rose-500/20"
-                        >
-                          {errorMessage}
-                        </motion.span>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </div>
-
-                {/* Pad Control buttons panel */}
-                <div className="p-4 md:p-6 bg-slate-900/60">
-                  <div className="grid grid-cols-1 gap-4">
-                    
-                    {/* Angle reference unit configurations & Quick Memory functions row */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-3 mb-2">
-                      <div className="flex gap-1.5">
-                        <button
-                          onClick={() => setIsRadian(true)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold leading-none transition-all cursor-pointer ${
-                            isRadian 
-                              ? 'bg-sky-600/30 text-sky-400 border border-sky-500/50' 
-                              : 'bg-slate-800 text-slate-400 hover:text-slate-300 border border-transparent'
-                          }`}
-                        >
-                          {t.radian}
-                        </button>
-                        <button
-                          onClick={() => setIsRadian(false)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold leading-none transition-all cursor-pointer ${
-                            !isRadian 
-                              ? 'bg-sky-600/30 text-sky-400 border border-sky-500/50' 
-                              : 'bg-slate-800 text-slate-400 hover:text-slate-300 border border-transparent'
-                          }`}
-                        >
-                          {t.degree}
-                        </button>
-                      </div>
-
-                      <div className="flex gap-1">
-                        <button 
-                          onClick={handleMemoryClear}
-                          title="Memory Clear (MC)"
-                          className="w-9 h-8 rounded-lg text-xs font-mono font-bold bg-slate-800 hover:bg-rose-950 hover:text-rose-400 border border-slate-700 text-slate-400 transition"
-                        >
-                          MC
-                        </button>
-                        <button 
-                          onClick={handleMemoryRecall}
-                          title="Memory Recall (MR)"
-                          className="w-9 h-8 rounded-lg text-xs font-mono font-bold bg-slate-800 hover:bg-slate-700 hover:text-slate-200 border border-slate-700 text-slate-400 transition"
-                        >
-                          MR
-                        </button>
-                        <button 
-                          onClick={handleMemoryAdd}
-                          title="Add to Memory (M+)"
-                          className="w-9 h-8 rounded-lg text-xs font-mono font-bold bg-slate-800 hover:bg-emerald-950 hover:text-emerald-400 border border-slate-700 text-slate-400 transition"
-                        >
-                          M+
-                        </button>
-                        <button 
-                          onClick={handleMemorySubtract}
-                          title="Subtract from Memory (M-)"
-                          className="w-9 h-8 rounded-lg text-xs font-mono font-bold bg-slate-800 hover:bg-amber-950 hover:text-amber-400 border border-slate-700 text-slate-400 transition"
-                        >
-                          M-
-                        </button>
-                        <button 
-                          onClick={handleMemoryStore}
-                          title="Store inside Memory (MS)"
-                          className="w-9 h-8 rounded-lg text-xs font-mono font-bold bg-slate-800 hover:bg-sky-950 hover:text-sky-400 border border-slate-700 text-slate-400 transition"
-                        >
-                          MS
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Standard & Scientific Combined Dynamic Keypad Grid */}
-                    <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
-                      
-                      {/* SCIENTIFIC MATH FUNCTIONS BUTTONS */}
-                      <button
-                        onClick={() => handleInsertText('sin(')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition-all active:scale-95 cursor-pointer"
-                      >
-                        sin
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('cos(')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition-all active:scale-95 cursor-pointer"
-                      >
-                        cos
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('tan(')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition-all active:scale-95 cursor-pointer"
-                      >
-                        tan
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('sqrt(')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition-all active:scale-95 cursor-pointer text-xs"
-                      >
-                        √ (sqrt)
-                      </button>
-
-                      {/* Power / brackets buttons */}
-                      <button
-                        onClick={() => handleInsertText('^')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-indigo-950/40 text-indigo-300 border border-indigo-900/60 hover:bg-indigo-900/60 transition-all active:scale-95 cursor-pointer"
-                      >
-                        x^y
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('(')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/70 hover:bg-slate-700 text-slate-300 border border-slate-800 transition active:scale-95 cursor-pointer"
-                      >
-                        (
-                      </button>
-                      <button
-                        onClick={() => handleInsertText(')')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/70 hover:bg-slate-700 text-slate-300 border border-slate-800 transition active:scale-95 cursor-pointer"
-                      >
-                        )
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('!')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition active:scale-95 cursor-pointer"
-                      >
-                        x!
-                      </button>
-
-                      <button
-                        onClick={() => handleInsertText('asin(')}
-                        type="button"
-                        className="h-12 rounded-xl text-xs font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-400 transition-all active:scale-95 cursor-pointer"
-                      >
-                        asin
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('acos(')}
-                        type="button"
-                        className="h-12 rounded-xl text-xs font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-400 transition-all active:scale-95 cursor-pointer"
-                      >
-                        acos
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('atan(')}
-                        type="button"
-                        className="h-12 rounded-xl text-xs font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-400 transition-all active:scale-95 cursor-pointer"
-                      >
-                        atan
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('cbrt(')}
-                        type="button"
-                        className="h-12 rounded-xl text-xs font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-400 transition active:scale-95 cursor-pointer"
-                      >
-                        ³√ (cbrt)
-                      </button>
-
-                      {/* Logarithms and Exp */}
-                      <button
-                        onClick={() => handleInsertText('log(')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition active:scale-95 cursor-pointer"
-                      >
-                        log₁₀
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('ln(')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition active:scale-95 cursor-pointer"
-                      >
-                        ln
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('exp(')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition active:scale-95 cursor-pointer"
-                      >
-                        e^x
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('abs(')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition active:scale-95 cursor-pointer"
-                      >
-                        |x|
-                      </button>
-
-                      {/* SCIENTIFIC CONSTANTS & VARIABLES IN CALCULATOR */}
-                      <button
-                        onClick={() => handleInsertText('π')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-teal-950/30 text-teal-400 border border-teal-900/50 hover:bg-teal-900/40 transition active:scale-95 cursor-pointer"
-                      >
-                        π (Pi)
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('e')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-teal-950/30 text-teal-400 border border-teal-900/50 hover:bg-teal-900/40 transition active:scale-95 cursor-pointer"
-                      >
-                        e
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('x')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-bold bg-amber-950/30 text-amber-500 border border-amber-900/50 hover:bg-amber-900/40 transition active:scale-95 cursor-pointer"
-                        title="Variable x for functions"
-                      >
-                        X
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('%')}
-                        type="button"
-                        className="h-12 rounded-xl text-sm font-mono font-semibold bg-slate-800/60 hover:bg-sky-950/80 hover:text-sky-400 border border-slate-800 text-slate-300 transition active:scale-95 cursor-pointer"
-                      >
-                        mod
-                      </button>
-
-                      {/* SYSTEM RECOVERY BUTTONS ROW */}
-                      <button
-                        onClick={handleClearAll}
-                        type="button"
-                        className="h-12 rounded-xl text-xs md:text-sm font-bold bg-rose-900 hover:bg-rose-800 text-rose-100 border border-rose-950 transition active:scale-95 cursor-pointer sm:col-span-2"
-                      >
-                        {t.btnClear}
-                      </button>
-                      
-                      <button
-                        onClick={handleDeleteChar}
-                        type="button"
-                        className="h-12 rounded-xl text-xs md:text-sm font-bold bg-amber-600 hover:bg-amber-500 text-amber-950 border border-amber-700 transition active:scale-95 flex items-center justify-center gap-1 cursor-pointer sm:col-span-2"
-                      >
-                        <Undo className="h-4 w-4" />
-                        <span>{t.btnDelete}</span>
-                      </button>
-
-                      {/* NUMERIC BUTTONS INTEGRATION & CORE OPERATORS */}
-                      <button
-                        onClick={() => handleInsertText('7')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer"
-                      >
-                        7
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('8')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer"
-                      >
-                        8
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('9')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer"
-                      >
-                        9
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('/')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-semibold bg-indigo-950/50 text-indigo-300 border border-indigo-900/40 hover:bg-indigo-900/40 transition active:scale-95 cursor-pointer"
-                      >
-                        ÷
-                      </button>
-
-                      <button
-                        onClick={() => handleInsertText('4')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer col-start-1 sm:col-start-5"
-                      >
-                        4
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('5')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer"
-                      >
-                        5
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('6')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer"
-                      >
-                        6
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('*')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-semibold bg-indigo-950/50 text-indigo-300 border border-indigo-900/40 hover:bg-indigo-900/40 transition active:scale-95 cursor-pointer"
-                      >
-                        ×
-                      </button>
-
-                      <button
-                        onClick={() => handleInsertText('1')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer col-start-1 sm:col-start-5"
-                      >
-                        1
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('2')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer"
-                      >
-                        2
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('3')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer"
-                      >
-                        3
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('-')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-semibold bg-indigo-950/50 text-indigo-300 border border-indigo-900/40 hover:bg-indigo-900/40 transition active:scale-95 cursor-pointer"
-                      >
-                        −
-                      </button>
-
-                      <button
-                        onClick={() => handleInsertText('0')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer col-start-1 sm:col-start-5"
-                      >
-                        0
-                      </button>
-                      <button
-                        onClick={() => handleInsertText('.')}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition active:scale-95 cursor-pointer"
-                      >
-                        .
-                      </button>
-
-                      {/* EQUATE SUBMIT TRIGGER KEY */}
-                      <button
-                        onClick={handleEvaluate}
-                        type="button"
-                        className="h-12 rounded-xl text-lg font-bold bg-sky-500 hover:bg-sky-400 text-slate-950 border border-sky-600 shadow-md shadow-sky-500/10 transition active:scale-95 col-span-2 cursor-pointer"
-                      >
-                        {t.btnEvaluate}
-                      </button>
-
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* TAB 1 SIDEBAR SIDE: HISTORIC CALCULATIONS */}
-              <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col h-[525px]">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-                  <div className="flex items-center gap-2">
-                    <Undo className="h-4 w-4 text-sky-400 rotate-180" />
-                    <h2 className="text-md font-bold text-slate-200">{t.historyTitle}</h2>
-                  </div>
-                  {history.length > 0 && (
-                    <button
-                      onClick={() => setHistory([])}
-                      className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1 px-2 py-1 rounded bg-rose-500/5 hover:bg-rose-500/10 transition cursor-pointer"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      <span>{t.clearHistory}</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                  <AnimatePresence initial={false}>
-                    {history.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center text-center h-full text-slate-500 p-4">
-                        <CalculatorIcon className="h-10 w-10 mb-2 opacity-25" />
-                        <p className="text-sm font-medium">{t.historyEmpty}</p>
-                      </div>
-                    ) : (
-                      history.map((item) => (
-                        <motion.div
-                          key={item.id}
-                          initial={{ opacity: 0, x: isRTL ? 20 : -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          exit={{ opacity: 0, scale: 0.9 }}
-                          className="bg-slate-950/60 border border-slate-800 hover:border-slate-700/80 p-3 rounded-xl relative group transition"
-                        >
-                          <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono mb-1">
-                            <span>{item.timestamp}</span>
-                            <span>{item.isRadian ? 'RAD' : 'DEG'}</span>
-                          </div>
-                          
-                          {/* Expression click-to-load feature */}
-                          <button
-                            onClick={() => {
-                              setExpression(item.expression);
-                              setErrorMessage('');
-                              if (inputRef.current) inputRef.current.focus();
-                            }}
-                            className="block w-full text-left ltr font-mono text-sm text-slate-300 hover:text-sky-400 font-medium break-all text-ellipsis overflow-hidden mt-1 text-left cursor-pointer"
-                            title="Click to load into editor"
-                          >
-                            {item.expression}
-                          </button>
-                          
-                          <div className="flex items-center justify-between mt-2 border-t border-slate-800/80 pt-1.5 gap-2">
-                            <span className="text-sm font-mono text-emerald-400 overflow-hidden text-ellipsis break-all ltr">
-                              = {item.result}
-                            </span>
-                            
-                            <div className="flex gap-1">
-                              {/* Copy response */}
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    await navigator.clipboard.writeText(item.result);
-                                    triggerCopyStatus(item.id);
-                                  } catch {}
-                                }}
-                                className="opacity-70 group-hover:opacity-100 hover:text-emerald-400 p-1 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded transition cursor-pointer"
-                                title={t.copy}
-                              >
-                                {showCopiedBadge === item.id ? (
-                                  <Check className="h-3 w-3 text-emerald-400" />
-                                ) : (
-                                  <Copy className="h-3 w-3" />
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      ))
-                    )}
-                  </AnimatePresence>
-                </div>
-              </div>
-
+        {authLoading ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-12">
+            <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+            <p className="mt-4 text-sm text-slate-400">جاري تحميل منصة الأستاذ دالي... صلي على محمد</p>
+          </div>
+        ) : !user ? (
+          /* Student Landing Page with introduction */
+          <div className="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto text-center px-4 py-8">
+            <span className="text-5xl mb-3">🇩🇿🤲</span>
+            <img 
+              src={globalSettings.profileImageUrl} 
+              alt="المعلم دالي" 
+              className="w-32 h-32 rounded-full border-4 border-emerald-500 object-cover mb-4 shadow-xl shadow-emerald-500/20"
+              onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
+            />
+            
+            <h2 className="text-2xl md:text-3xl font-extrabold text-emerald-400 tracking-tight">مرحباً بكم في منصة "المعلم DZ"</h2>
+            <p className="text-xs text-slate-400 mt-1 font-mono">بإشراف وبرمجة الأستاذ دالي نجيب لذكاء اصطناعي تفاعلي مدروس</p>
+            
+            <div className="mt-6 bg-[#0c152a] p-5 rounded-2xl border border-emerald-950/50 text-right space-y-3">
+              <span className="text-xs text-emerald-500 font-bold block">🌟 ميزات تطبيق الأستاذ دالي:</span>
+              <ul className="text-xs text-slate-300 space-y-2 list-disc list-inside">
+                <li>إجابات أكاديمية دقيقة وتدريجية في كافة المجالات ومادة الرياضيات.</li>
+                <li>أسلوب جزائري وطني أصيل يحمل في طياته الصلاة على محمد ﷺ.</li>
+                <li><strong>نظام تفاعلي متقدم:</strong> يقوم الأستاذ بشرح مفهوم ثم يطرح عليك فوراً سؤال اختبار للتأكد من فهمك للSegmnet!</li>
+                <li>إمكانية رفع ومشاركة الصور للذكاء الاصطناعي لتحليلها فوراً.</li>
+                <li>لوحة تحكم آمنة وخاصة للأستاذ دالي لمتابعة أسئلة وملفات طلابه.</li>
+              </ul>
             </div>
-          )}
 
-          {/* TAB 2: INTERACTIVE COORDINATES PLOTTER */}
-          {activeTab === 'graph' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              
-              {/* Configuration Panel side */}
-              <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-6 shadow-xl space-y-4">
-                
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                    {t.graphFunction}
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-3 flex items-center text-sm font-mono text-slate-500 select-none">
-                      y = f(x) =
-                    </span>
-                    <input
-                      type="text"
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 rounded-xl py-2.5 pl-20 pr-3 font-mono text-sm text-slate-100 outline-none transition ltr"
-                      placeholder={t.graphPlaceholder}
-                      value={graphEquation}
-                      onChange={(e) => {
-                        setGraphEquation(e.target.value);
-                        setGraphPointTrace(null);
-                      }}
-                    />
-                  </div>
+            <button
+              onClick={signInWithGoogle}
+              className="mt-8 flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition-all shadow-lg shadow-emerald-600/10 border border-emerald-500"
+            >
+              <LogIn className="h-5 w-5" />
+              <span>ابدأ الدراسة الآن (دخول بحساب جوجل)</span>
+            </button>
+            
+            <span className="text-[10px] text-slate-500 mt-4 block">
+              للولوج للوحة التحكم كأستاذ، يرجى تسجيل الدخول بأحد البريدين المعتمدين.
+            </span>
+          </div>
+        ) : (
+          /* Logged In Workspace */
+          <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 bg-[#060a14] rounded-2xl p-2 md:p-4 border border-slate-900 overflow-hidden">
+            
+            {/* SIDEBAR FOR STUDENTS OR ADMIN CONVERSATIONS VIEWS */}
+            {activeTab === 'chat' && (
+              <aside className={`w-full lg:w-72 bg-[#0b132a]/90 rounded-xl p-3 flex flex-col border border-slate-800 ${drawerOpen ? 'block' : 'hidden lg:flex'}`}>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <span className="text-xs font-bold text-slate-400">محادثاتي الدراسية</span>
+                  <button
+                    onClick={createNewChatRoom}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-emerald-950 text-emerald-400 hover:bg-emerald-900 rounded-lg border border-emerald-900 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>محادثة جديدة</span>
+                  </button>
                 </div>
 
-                {/* Predefined interesting functions to quickly test */}
-                <div className="border-t border-slate-800 pt-3">
-                  <span className="text-xs text-slate-500 block mb-2 font-semibold">أمثلة سريعة للدوال الرياضية الرسم:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      { l: 'x^2 - 3', e: 'x^2 - 3' },
-                      { l: 'sin(x)', e: 'sin(x)' },
-                      { l: 'cos(x) * 2', e: 'cos(x) * 2' },
-                      { l: 'abs(x) - 4', e: 'abs(x) - 4' },
-                      { l: 'sqrt(abs(x)) * 3', e: 'sqrt(abs(x)) * 3' },
-                      { l: 'x^3 - 3x', e: 'x^3 - 3*x' },
-                      { l: 'exp(-x^2)', e: 'exp(-x^2)' }
-                    ].map((btn, index) => (
-                      <button
-                        key={index}
+                <div className="flex-1 overflow-y-auto space-y-1.5 max-h-[300px] lg:max-h-none">
+                  {sessions.length === 0 ? (
+                    <div className="text-center py-6 text-slate-500 text-xs">لا توجد محادثات نشطة حالياً.</div>
+                  ) : (
+                    sessions.map((sess) => (
+                      <div 
+                        key={sess.id}
                         onClick={() => {
-                          setGraphEquation(btn.e);
-                          setGraphPointTrace(null);
+                          setActiveSessionId(sess.id);
+                          setViewingSessionId(null);
                         }}
-                        className="px-2.5 py-1 text-xs font-mono bg-slate-800 hover:bg-slate-700 hover:text-sky-400 border border-slate-700/80 rounded-lg text-slate-300 transition cursor-pointer"
-                      >
-                        {btn.l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Bounds configuration section */}
-                <div className="border-t border-slate-800 pt-3 space-y-3">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-                    {t.graphSettings}
-                  </span>
-                  
-                  {/* Min Max Ranges inputs */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-slate-500 font-mono block">{t.xRange} ({t.from} &rarr; {t.to})</span>
-                      <div className="flex gap-1">
-                        <input
-                          type="number"
-                          step="1"
-                          className="w-1/2 bg-slate-950 border border-slate-800 text-xs font-mono text-center rounded p-1"
-                          value={xMin}
-                          onChange={(e) => setXMin(parseFloat(e.target.value) || -10)}
-                        />
-                        <input
-                          type="number"
-                          step="1"
-                          className="w-1/2 bg-slate-950 border border-slate-800 text-xs font-mono text-center rounded p-1"
-                          value={xMax}
-                          onChange={(e) => setXMax(parseFloat(e.target.value) || 10)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-slate-500 font-mono block">{t.yRange} ({t.from} &rarr; {t.to})</span>
-                      <div className="flex gap-1">
-                        <input
-                          type="number"
-                          step="1"
-                          className="w-1/2 bg-slate-950 border border-slate-800 text-xs font-mono text-center rounded p-1"
-                          value={yMin}
-                          onChange={(e) => setYMin(parseFloat(e.target.value) || -10)}
-                        />
-                        <input
-                          type="number"
-                          step="1"
-                          className="w-1/2 bg-slate-950 border border-slate-800 text-xs font-mono text-center rounded p-1"
-                          value={yMax}
-                          onChange={(e) => setYMax(parseFloat(e.target.value) || 10)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Graph Zoom Controls */}
-                <div className="border-t border-slate-800 pt-3 space-y-2">
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      onClick={() => handleZoom(0.5)}
-                      className="px-2 py-2 text-xs font-bold leading-none bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-center transition cursor-pointer border border-slate-700/85"
-                    >
-                      {t.graphZoomIn}
-                    </button>
-                    <button
-                      onClick={() => handleZoom(1.8)}
-                      className="px-2 py-2 text-xs font-bold leading-none bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-center transition cursor-pointer border border-slate-700/85"
-                    >
-                      {t.graphZoomOut}
-                    </button>
-                    <button
-                      onClick={handleResetProjection}
-                      className="px-2 py-2 text-xs font-bold leading-none bg-sky-950/40 hover:bg-sky-900/30 text-sky-400 rounded-lg text-center transition cursor-pointer border border-sky-800/40"
-                    >
-                      {t.graphReset}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Graph Alert Messages */}
-                {graphError && (
-                  <div className="bg-rose-500/10 border border-rose-500/20 text-rose-300 p-3 rounded-xl text-xs flex items-start gap-2">
-                    <div className="bg-rose-500 text-slate-950 rounded-full p-0.5 mt-0.5 shrink-0 flex items-center justify-center font-bold font-mono text-[9px] w-4 h-4">!</div>
-                    <span className="leading-relaxed">{t.unsupportedGraph}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Graphical Board Plotting Screen (HTML5 Canvas) */}
-              <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
-                
-                {/* Board element with responsive cursor interactions */}
-                <div className="relative bg-slate-950 rounded-xl overflow-hidden aspect-[4/3] md:aspect-[16/10] border border-slate-800">
-                  <canvas
-                    ref={canvasRef}
-                    onMouseMove={handleCanvasMouseMove}
-                    onMouseLeave={handleCanvasMouseLeave}
-                    className="absolute inset-0 w-full h-full cursor-crosshair block"
-                  />
-                  
-                  {/* Floating trace point tooltip readout overlay */}
-                  {graphPointTrace && (
-                    <div 
-                      className="absolute bg-slate-900/95 border border-slate-700/80 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-200 pointer-events-none shadow-xl flex flex-col gap-0.5 leading-none backdrop-blur-sm"
-                      style={{
-                        left: `${Math.min(graphPointTrace.px + 15, canvasRef.current ? canvasRef.current.clientWidth - 130 : 0)}px`,
-                        top: `${Math.min(graphPointTrace.py + 15, canvasRef.current ? canvasRef.current.clientHeight - 60 : 0)}px`
-                      }}
-                    >
-                      <span className="text-[10px] text-sky-400 font-bold border-b border-slate-800 pb-0.5 mb-0.5">Trace Data Point</span>
-                      <span dir="ltr">X: {graphPointTrace.x.toFixed(4)}</span>
-                      <span dir="ltr">Y: {graphPointTrace.y.toFixed(4)}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Canvas usage indicator note */}
-                <div className="bg-slate-900 text-[11px] text-slate-400/85 text-center leading-normal">
-                  💡 {lang === 'ar' ? 'حرك مؤشر الماوس فوق مساحة الرسم البياني لتكتشف تتبع الإحداثيات الحية للنقاط المعينة على المنحنى.' : 'Move mouse cursor over the canvas mesh to discover tracer coordinate values along the curve.'}
-                </div>
-              </div>
-
-            </div>
-          )}
-
-          {/* TAB 3: PHYSICAL UNIT CONVERTER */}
-          {activeTab === 'converter' && (
-            <div className="max-w-3xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-              
-              {/* Category select block */}
-              <div>
-                <label className="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-3 text-center">
-                  {t.unitCategory}
-                </label>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  {UNIT_CATEGORIES.map(category => {
-                    const isSelected = unitCategory === category.id;
-                    return (
-                      <button
-                        key={category.id}
-                        onClick={() => setUnitCategory(category.id)}
-                        className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all text-center cursor-pointer ${
-                          isSelected
-                            ? 'bg-sky-500/10 text-sky-400 border-sky-500/60 shadow-lg shadow-sky-500/5'
-                            : 'bg-slate-950/40 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:border-slate-700'
+                        className={`group flex items-center justify-between p-2.5 rounded-lg text-xs cursor-pointer transition ${
+                          activeSessionId === sess.id 
+                            ? 'bg-emerald-900/40 border border-emerald-800/60 text-emerald-300' 
+                            : 'bg-[#060a14]/60 hover:bg-[#0c1328] border border-transparent text-slate-300'
                         }`}
                       >
-                        <Layers className={`h-5 w-5 mb-1 opacity-90 ${isSelected ? 'text-sky-400' : 'text-slate-500'}`} />
-                        <span className="text-xs font-bold leading-none mt-1">
-                          {lang === 'ar' ? category.nameAr : category.nameEn}
-                        </span>
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <MessageSquare className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span className="truncate">{sess.title}</span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteSession(sess.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-rose-400 rounded transition"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-slate-800 text-center">
+                  <p className="text-[11px] text-slate-400">لا تنسونا من صالح دعائكم 🇩🇿🤲</p>
+                </div>
+              </aside>
+            )}
+
+            {/* MAIN CORE BODY PANEL */}
+            <div className="flex-1 flex flex-col min-h-0 bg-[#070c1a] rounded-xl border border-slate-900 overflow-hidden">
+              
+              {/* CHAT TAB SECTOR */}
+              {activeTab === 'chat' && (
+                <div className="flex-1 flex flex-col min-h-0">
+                  
+                  {/* Active Chat Header */}
+                  <div className="bg-[#0b132a] p-3 border-b border-emerald-950/50 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setDrawerOpen(!drawerOpen)}
+                        className="lg:hidden p-1.5 text-slate-400 hover:text-slate-200"
+                      >
+                        <Menu className="w-5 h-5" />
                       </button>
-                    );
-                  })}
-                </div>
-              </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <img 
+                          src={globalSettings.profileImageUrl} 
+                          alt="المعلم دالي" 
+                          className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
+                          onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
+                        />
+                        <div>
+                          <span className="text-xs font-bold text-slate-100 block">الأستاذ دالي نجيب 🇩🇿</span>
+                          <span className="text-[10px] text-emerald-500 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            نشط بالذكاء الاصطناعي المتقدم
+                          </span>
+                        </div>
+                      </div>
+                    </div>
 
-              {/* Conversion calculation block */}
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-slate-950/50 p-5 rounded-xl border border-slate-800/40">
-                
-                {/* SOURCE VALUE COLUMN */}
-                <div className="md:col-span-5 space-y-2">
-                  <span className="text-xs text-slate-400 block font-semibold">{t.unitValue}</span>
-                  <div className="flex bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-xl overflow-hidden focus-within:border-sky-500 transition leading-none">
-                    <input
-                      type="number"
-                      className="w-2/3 bg-transparent px-3 py-2.5 font-mono text-sm inline-block outline-none text-slate-100"
-                      value={unitValueFrom}
-                      onChange={(e) => setUnitValueFrom(e.target.value)}
-                    />
-                    <select
-                      className="w-1/3 bg-slate-950/80 px-2 font-mono text-xs border-r border-slate-800 hover:text-sky-400 transition cursor-pointer text-slate-300 focus:outline-none"
-                      value={unitFrom}
-                      onChange={(e) => setUnitFrom(e.target.value)}
-                    >
-                      {UNIT_CATEGORIES.find(c => c.id === unitCategory)?.units.map(u => (
-                        <option key={u.id} value={u.id}>
-                          {u.symbol} ({lang === 'ar' ? u.nameAr : u.nameEn})
-                        </option>
-                      ))}
-                    </select>
+                    <div className="text-xs text-slate-400 flex items-center gap-1.5 font-mono">
+                      <Clock className="w-3.5 h-3.5 text-emerald-500" />
+                      أسلوب أكاديمي تدرجي مبرمج
+                    </div>
                   </div>
-                </div>
 
-                {/* TRANSFER GLYPH COMPONENT */}
-                <div className="md:col-span-2 flex justify-center py-2 md:py-0">
-                  <div className="bg-sky-500/10 border border-sky-500/20 p-2.5 rounded-full text-sky-400">
-                    <ArrowRightLeft className="h-5 w-5 rotate-90 md:rotate-0" />
+                  {/* Messages list */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {messages.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
+                        <Sparkles className="w-8 h-8 text-emerald-500 mb-2 animate-bounce" />
+                        <span className="text-sm font-bold">ابدأ محادثة دراسية مع الأستاذ دالي!</span>
+                        <p className="text-xs max-w-sm mt-1">اضغط على زر (محادثة جديدة) في القائمة الجانبية أو ابدأ الكتابة فوراً.</p>
+                      </div>
+                    ) : (
+                      messages.map((msg) => (
+                        <div 
+                          key={msg.id}
+                          className={`flex gap-3 max-w-[85%] ${
+                            msg.sender === 'student' ? 'mr-auto flex-row-reverse' : 'ml-auto'
+                          }`}
+                        >
+                          {/* Avatar */}
+                          <div className="shrink-0">
+                            {msg.sender === 'teacher' ? (
+                              <img 
+                                src={globalSettings.profileImageUrl} 
+                                alt="المعلم دالي" 
+                                className="w-8 h-8 rounded-full border border-emerald-500 object-cover"
+                                onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
+                              />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-indigo-900/50 flex items-center justify-center text-xs font-bold text-indigo-300 border border-indigo-700">
+                                {user?.displayName?.substring(0, 1) || 'ت'}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Message bubble */}
+                          <div className="space-y-1">
+                            <span className="text-[9px] text-slate-500 font-mono block">
+                              {msg.sender === 'student' ? user?.displayName || 'تلميذ' : 'الأستاذ دالي'}
+                            </span>
+                            
+                            <div className={`p-3.5 rounded-2xl text-xs leading-relaxed ${
+                              msg.sender === 'student' 
+                                ? 'bg-[#0f1d3a] text-slate-100 rounded-tr-none border border-slate-800' 
+                                : 'bg-[#0b132a] text-emerald-50 rounded-tl-none border border-slate-900/80 shadow'
+                            }`}>
+                              
+                              {/* Display attached image parsed to Gemini */}
+                              {msg.imageUrl && (
+                                <div className="mb-2.5 max-w-xs rounded-lg overflow-hidden border border-slate-700">
+                                  <img 
+                                    src={msg.imageUrl} 
+                                    alt="مرفق التلميذ" 
+                                    className="w-full max-h-48 object-cover" 
+                                  />
+                                </div>
+                              )}
+
+                              <p className="whitespace-pre-line select-text">{msg.text}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    {aiResponding && (
+                      <div className="flex gap-3 max-w-[85%] ml-auto">
+                        <div className="shrink-0">
+                          <img 
+                            src={globalSettings.profileImageUrl} 
+                            alt="المعلم دالي" 
+                            className="w-8 h-8 rounded-full border border-emerald-500 object-cover"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-[9px] text-slate-500 font-mono block">الأستاذ دالي يكتب...</span>
+                          <div className="bg-[#0b132a]/80 p-3 rounded-2xl rounded-tl-none border border-emerald-950/40 text-xs flex items-center gap-2 text-emerald-400">
+                            <div className="flex gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping delay-75"></span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping delay-150"></span>
+                            </div>
+                            <span>صلي على محمد و انتظرني دقيقة بني...</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
                   </div>
-                </div>
 
-                {/* TARGET VALUE COLUMN */}
-                <div className="md:col-span-5 space-y-2">
-                  <span className="text-xs text-slate-400 block font-semibold">{t.unitResult}</span>
-                  <div className="flex bg-slate-900 border border-slate-800 rounded-xl overflow-hidden leading-none opacity-90">
+                  {/* Attachment indicator bar */}
+                  {attachedImageUrl && (
+                    <div className="px-4 py-2 bg-[#0c152a] border-t border-emerald-950/30 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <img src={attachedImageUrl} alt="مرفق تحميل" className="w-10 h-10 object-cover rounded-lg border border-slate-700" />
+                        <span className="text-[10px] text-slate-400">صورة مرفقة جاهزة للإرسال والتحليل الذكي للأستاذ دالي 📸</span>
+                      </div>
+                      <button 
+                        onClick={() => setAttachedImageUrl(null)}
+                        className="text-xs text-rose-400 hover:text-rose-300 font-bold"
+                      >
+                        إلغاء المرفق
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Input Box Form */}
+                  <form onSubmit={handleSendMessage} className="p-3 bg-[#0b132a]/60 border-t border-slate-900 flex items-center gap-2">
+                    
+                    {/* Cloudinary picture attachment exactly as specified: "ارسال صور ذكاء اصطناعي لتحايلها نستعمل doaxziqm7 nadjib dali" */}
+                    <label className="shrink-0 p-2.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-950/20 rounded-xl border border-slate-800 transition cursor-pointer relative">
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={handleFileUpload}
+                        disabled={uploadingImage || aiResponding}
+                      />
+                      <ImageIcon className="w-4.5 h-4.5" />
+                      {uploadingImage && (
+                        <span className="absolute inset-0 bg-slate-950/90 rounded-xl flex items-center justify-center">
+                          <span className="w-3 h-3 border border-emerald-500 border-t-transparent rounded-full animate-spin"></span>
+                        </span>
+                      )}
+                    </label>
+
                     <input
                       type="text"
-                      className="w-2/3 bg-slate-950/50 px-3 py-2.5 font-mono text-sm inline-block outline-none text-emerald-400 font-bold select-all"
-                      value={unitValueTo}
-                      readOnly
+                      placeholder={
+                        aiResponding 
+                          ? "الأستاذ دالي يراجع الإجابة الآن..." 
+                          : "اكتب سؤالك العلمي، تمرينك الرياضي أو استفسارك هنا للأستاذ دالي..."
+                      }
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      disabled={aiResponding}
+                      className="flex-1 bg-[#060a14] border border-slate-800 focus:border-emerald-700/80 px-4 py-2.5 rounded-xl text-xs outline-none focus:ring-1 focus:ring-emerald-700/30 transition text-slate-100 placeholder-slate-600"
                     />
-                    <select
-                      className="w-1/3 bg-slate-950/80 px-2 font-mono text-xs border-r border-slate-800 hover:text-sky-400 transition cursor-pointer text-slate-300 focus:outline-none"
-                      value={unitTo}
-                      onChange={(e) => setUnitTo(e.target.value)}
-                    >
-                      {UNIT_CATEGORIES.find(c => c.id === unitCategory)?.units.map(u => (
-                        <option key={u.id} value={u.id}>
-                          {u.symbol} ({lang === 'ar' ? u.nameAr : u.nameEn})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
 
-              </div>
-              
-            </div>
-          )}
-
-          {/* TAB 4: SCIENTIFIC CONSTANTS REFERENCE WORKSHEET */}
-          {activeTab === 'constants' && (
-            <div className="max-w-5xl mx-auto space-y-5">
-              
-              {/* Reference Search & Filter strip */}
-              <div className="flex flex-col md:flex-row items-center gap-3 justify-between bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-md">
-                
-                {/* Live Search bar */}
-                <div className="w-full md:w-1/2 relative bg-slate-950/80 border border-slate-800 rounded-lg overflow-hidden leading-none">
-                  <input
-                    type="text"
-                    className="w-full bg-transparent px-4 py-2.5 text-sm outline-none text-slate-100"
-                    placeholder={t.searchPlaceholder}
-                    value={searchConstant}
-                    onChange={(e) => setSearchConstant(e.target.value)}
-                  />
-                </div>
-
-                {/* Categories toggle row */}
-                <div className="flex gap-1 overflow-x-auto w-full md:w-auto pb-1 md:pb-0 scrollbar-none">
-                  {[
-                    { id: 'all', lAr: 'جميع المجالات', lEn: 'All Fields' },
-                    { id: 'physics', lAr: 'الفيزياء', lEn: 'Physics' },
-                    { id: 'chemistry', lAr: 'الكيمياء', lEn: 'Chemistry' },
-                    { id: 'math', lAr: 'الرياضيات', lEn: 'Math' }
-                  ].map(tab => (
                     <button
-                      key={tab.id}
-                      onClick={() => setSelectedCategory(tab.id as any)}
-                      className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition border cursor-pointer shrink-0 ${
-                        selectedCategory === tab.id
-                          ? 'bg-sky-500/10 text-sky-400 border-sky-505/40 font-bold'
-                          : 'bg-slate-850/30 text-slate-400 border-transparent hover:text-slate-300'
-                      }`}
+                      type="submit"
+                      disabled={(!inputText.trim() && !attachedImageUrl) || aiResponding}
+                      className="p-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold rounded-xl transition"
                     >
-                      {lang === 'ar' ? tab.lAr : tab.lEn}
+                      <Send className="w-4 h-4" />
                     </button>
-                  ))}
+                  </form>
+
                 </div>
-              </div>
+              )}
 
-              {/* Constants Mesh Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredConstants.map((item, index) => (
-                  <div
-                    key={index}
-                    className="bg-slate-900 border border-slate-850 hover:border-slate-800 p-4 rounded-xl shadow-lg relative group transition flex flex-col justify-between"
-                  >
-                    <div>
-                      {/* Name & Badge category */}
-                      <div className="flex items-start justify-between gap-1.5 mb-2">
-                        <span className={`text-[9px] uppercase px-2 py-0.5 rounded-full font-bold tracking-wider leading-none select-none ${
-                          item.category === 'physics' 
-                            ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' 
-                            : item.category === 'chemistry' 
-                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                            : 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
-                        }`}>
-                          {item.category === 'physics' ? t.categoryPhysics : item.category === 'chemistry' ? t.categoryChemistry : t.categoryMath}
-                        </span>
-                        
-                        <span className="text-xl font-extrabold font-mono text-sky-400 px-1">
-                          {item.symbol}
-                        </span>
+              {/* ADMIN CONTROL PANEL SECTOR (SECURED STRICTLY BY DIRECT RULE EMAIL CHECKS FOR TWO SPECIFIED USERS) */}
+              {activeTab === 'admin' && (
+                <div className="flex-1 flex flex-col min-h-0 bg-[#070c1a]">
+                  
+                  {/* Dashboard header and tab options */}
+                  <div className="bg-[#0b132a] p-4 border-b border-emerald-950/50 flex flex-col md:flex-row items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <LayoutDashboard className="w-5 h-5 text-emerald-500 animate-pulse" />
+                      <div>
+                        <span className="text-sm font-bold text-slate-100">لوحة التحكم الآمنة - الأستاذ دالي نجيب</span>
+                        <p className="text-[10px] text-slate-400">مرحباً بك أستاذنا الفاضل. تحكم ببروفايلك ومفاتيح API بموثوقية عالية.</p>
                       </div>
-
-                      {/* Descriptive Titles */}
-                      <h3 className="text-sm font-bold text-slate-200">{lang === 'ar' ? item.nameAr : item.nameEn}</h3>
-                      <p className="text-xs text-slate-400 mt-0.5 font-mono text-slate-500 shrink-0">{lang === 'en' ? item.nameAr : item.nameEn}</p>
                     </div>
 
-                    {/* Numeric readout & insert triggers container */}
-                    <div className="border-t border-slate-800/80 mt-4 pt-3 flex flex-col gap-2">
-                      <div className="flex items-center justify-between font-mono gap-1.5">
-                        <span className="text-slate-400 text-xs truncate" dir="ltr" title={item.value}>
-                          {item.displayValue}
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-semibold">{item.unit !== '-' ? item.unit : ''}</span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-1.5 mt-2 pt-1 border-t border-slate-850/40">
-                        {/* Insert into active display */}
-                        <button
-                          onClick={() => {
-                            // Insert physical constant value into active math evaluator pad
-                            handleInsertText(item.value);
-                            setActiveTab('calculator');
-                            triggerCopyStatus(`insert-${index}`);
-                          }}
-                          className="px-2 py-1.5 text-[10px] font-semibold bg-sky-950/20 hover:bg-sky-900/30 text-sky-400 border border-sky-900/40 rounded-lg transition active:scale-95 text-center flex items-center justify-center gap-1 cursor-pointer"
-                        >
-                          <Plus className="h-3 w-3" />
-                          <span>{t.insertConstant}</span>
-                        </button>
-
-                        {/* Copy raw button */}
-                        <button
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(item.value);
-                              triggerCopyStatus(`copy-${index}`);
-                            } catch {}
-                          }}
-                          className="px-2 py-1.5 text-[10px] font-semibold bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg transition active:scale-95 text-center flex items-center justify-center gap-1 cursor-pointer"
-                        >
-                          {showCopiedBadge === `copy-${index}` ? (
-                            <Check className="h-3 w-3 text-emerald-400" />
-                          ) : (
-                            <Copy className="h-3 w-3 text-slate-400" />
-                          )}
-                          <span>{showCopiedBadge === `copy-${index}` ? t.copiedStatus : t.copy}</span>
-                        </button>
-                      </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => setAdminSubTab('settings')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${adminSubTab === 'settings' ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>بروفيل الأستاذ</span>
+                      </button>
+                      <button
+                        onClick={() => setAdminSubTab('keys')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${adminSubTab === 'keys' ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                      >
+                        <Key className="w-3.5 h-3.5" />
+                        <span>المفاتيح و Rotation 🔄</span>
+                      </button>
+                      <button
+                        onClick={() => setAdminSubTab('conversations')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${adminSubTab === 'conversations' ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'}`}
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>متابعة الطلبة ({studentSessions.length})</span>
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
+
+                  {/* Sub Content sectors */}
+                  <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                    
+                    {/* Admin SUB TAB 1: Profile & Welcome Text modifications */}
+                    {adminSubTab === 'settings' && (
+                      <div className="max-w-2xl mx-auto space-y-5">
+                        
+                        {/* Profile Image Cloudinary file upload exactly as requested: "نبدل فطو بروفيل تاعي... nadjib dali doaxziqm7" */}
+                        <div className="bg-[#0b132a] p-5 rounded-2xl border border-slate-800 space-y-4">
+                          <h3 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                            <ImageIcon className="w-4 h-4" />
+                            <span>تغيير صورة بروفيل الأستاذ دالي نجيب (تُحمل على Cloudinary)</span>
+                          </h3>
+                          <div className="flex flex-col md:flex-row items-center gap-4">
+                            <img 
+                              src={globalSettings.profileImageUrl} 
+                              alt="صورة الأستاذ" 
+                              className="w-24 h-24 rounded-full border-2 border-emerald-500 object-cover shadow shadow-emerald-500/10"
+                            />
+                            <div className="space-y-2">
+                              <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-all shadow-md cursor-pointer">
+                                <Upload className="w-4 h-4" />
+                                <span>رفع صورة جديدة للأستاذ</span>
+                                <input 
+                                  type="file" 
+                                  accept="image/*" 
+                                  className="hidden" 
+                                  onChange={handleProfileImageUpload}
+                                  disabled={uploadingProfile}
+                                />
+                              </label>
+                              <p className="text-[10px] text-slate-400">موصول بـ Cloudinary: doaxziqm7 والمجلد nadjib dali.</p>
+                              {uploadingProfile && (
+                                <span className="text-[11px] text-emerald-400 block animate-pulse">جاري رفع وحفظ الصورة الجديدة... صلي على محمد</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Welcome Message Customizer */}
+                        <div className="bg-[#0b132a] p-5 rounded-2xl border border-slate-800 space-y-3">
+                          <h3 className="text-xs font-bold text-emerald-400">تعديل رسالة الترحيب الأولى للطلبة</h3>
+                          <textarea
+                            value={editedWelcome}
+                            onChange={(e) => setEditedWelcome(e.target.value)}
+                            rows={3}
+                            placeholder="اكتب رسالة الترحيب التي ينطق بها الأستاذ للطلبة..."
+                            className="w-full bg-[#060a14] border border-slate-800 focus:border-emerald-500 p-3 rounded-lg text-xs text-slate-200 outline-none transition"
+                          />
+                          <div className="flex justify-end">
+                            <button
+                              onClick={handleSaveWelcomeMessage}
+                              disabled={savingSettings}
+                              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                              <span>تحديث وحفظ رسالة الترحيب</span>
+                            </button>
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+
+                    {/* Admin SUB TAB 2: Secure API key dynamic rotation manager */}
+                    {adminSubTab === 'keys' && (
+                      <div className="max-w-2xl mx-auto space-y-5">
+                        <div className="bg-[#0b132a] p-5 rounded-2xl border border-slate-800 space-y-4">
+                          <h3 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                            <Key className="w-4 h-4" />
+                            <span>نظام دوران مفاتيح Google Gemini API الذكي (Rotations)</span>
+                          </h3>
+                          <p className="text-[11px] text-slate-300">
+                            عند توفر مفاتيح متعددة، سيقوم المعلم DZ بالتنقل الآمن والدوراني بينهم في كل محادثة لضمان استقرار العمل وتجنب تجاوز الحصص المجانية.
+                          </p>
+
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                            <input
+                              type="password"
+                              placeholder="أدخل مفتاح Google Gemini API الجديد هنا..."
+                              value={newKey}
+                              onChange={(e) => setNewKey(e.target.value)}
+                              className="md:col-span-9 bg-[#060a14] border border-slate-800 focus:border-emerald-500 px-3 py-2 rounded-lg text-xs text-slate-100 outline-none transition font-mono"
+                            />
+                            <button
+                              onClick={handleAddGeminiKey}
+                              className="md:col-span-3 flex items-center justify-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition"
+                            >
+                              <Plus className="w-4 h-4" />
+                              <span>إضافة المفتاح</span>
+                            </button>
+                          </div>
+
+                          <div className="space-y-2 mt-4">
+                            <span className="text-[10px] text-slate-400 block font-bold">المفاتيح المدورة النشطة حالياً:</span>
+                            {globalSettings.geminiKeys.length === 0 ? (
+                              <div className="text-center py-4 bg-[#060a14] p-3 rounded-lg text-slate-500 text-xs border border-dashed border-slate-800">
+                                لا توجد مفاتيح مخصصة حتى الآن. جاري استخدام المفتاح المبرمج الافتراضي للجهاز.
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {globalSettings.geminiKeys.map((k, index) => (
+                                  <div key={index} className="flex items-center justify-between p-2.5 bg-[#060a14] rounded-lg border border-slate-800 text-xs">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                      <span className="font-mono text-[10px] text-emerald-400 font-bold">المفتاح #{index + 1} (مخفي ومحمي على السيرفر)</span>
+                                    </div>
+                                    <span className="text-[10px] bg-slate-900 border border-slate-800 text-slate-400 px-2.5 py-1 rounded">نشط بالدوران</span>
+                                  </div>
+                                ))}
+                                <div className="flex justify-end pt-2">
+                                  <button
+                                    onClick={handleResetAllKeys}
+                                    className="flex items-center gap-1 px-3 py-1.5 bg-rose-950 text-rose-400 hover:bg-rose-900 rounded-lg text-xs font-semibold border border-rose-900 transition"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>تصفير وإزالة كافة المفاتيح</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Admin SUB TAB 3: Student chats monitoring */}
+                    {adminSubTab === 'conversations' && (
+                      <div className="space-y-4">
+                        <div className="bg-[#0b132a] p-4 rounded-xl border border-slate-800">
+                          <span className="text-xs font-bold text-slate-400 block mb-2">استعراض غرف محادثات المتعلمين ومتابعتهم تدرجياً:</span>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {studentSessions.length === 0 ? (
+                              <div className="col-span-full text-center py-6 text-slate-500 text-xs">لا يوجد طلاب متصلين أو غرف دراسية بعد.</div>
+                            ) : (
+                              studentSessions.map((sess) => (
+                                <div
+                                  key={sess.id}
+                                  onClick={() => {
+                                    setViewingSessionId(sess.id);
+                                    setActiveSessionId(null);
+                                    setActiveTab('chat'); // go view details index
+                                  }}
+                                  className="p-3 bg-[#060a14] rounded-lg border border-slate-800 hover:border-emerald-700/60 transition cursor-pointer text-xs space-y-2"
+                                >
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="font-bold text-emerald-400 truncate">{sess.userEmail}</span>
+                                    <span className="text-[9px] text-slate-500 shrink-0 font-mono">
+                                      {new Date(sess.lastMessageAt).toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                  <div className="text-slate-300 font-bold truncate">{sess.title}</div>
+                                  <div className="flex items-center justify-between gap-1 pt-1 border-t border-slate-900 text-[10px] text-slate-400">
+                                    <span>محادثة: #{sess.id.substring(0, 6)}</span>
+                                    <span className="text-emerald-500 hover:underline flex items-center gap-0.5 font-bold">
+                                      دخول للمتابعة
+                                      <ExternalLink className="w-3 h-3" />
+                                    </span>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                </div>
+              )}
 
             </div>
-          )}
 
-        </div>
+          </div>
+        )}
 
       </main>
 
-      {/* FOOTER COZY BRAND DESIGN */}
-      <footer className="border-t border-slate-800/40 bg-slate-900/10 px-4 py-8 mt-12 text-center text-slate-500 text-xs">
-        <div className="max-w-7xl mx-auto space-y-2">
-          <div>الآلة الحاسبة العلمية الذكية © 2026 - جميع الحقوق محفوظة</div>
-          <div className="text-[11px] text-slate-600/80">
-            تم التنفيذ بأرقى معايير واجهات المستخدم الرياضية والهندسية لتوفير حوسبة متكاملة.
-          </div>
+      {/* Main Footer markup */}
+      <footer className="bg-[#0b132a]/90 border-t border-emerald-950/40 p-3 text-center text-[11px] text-slate-400">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-2">
+          <span>المساعد التعليمي "المعلم DZ" - الأستاذ دالي نجيب 🇩🇿</span>
+          <span className="font-mono text-[10px] text-emerald-500 font-semibold flex items-center gap-1">
+            <span>صلي على محمد ﷺ</span>
+            <span>●</span>
+            <span>لا تنسونا من صالح دعائكم 🤲</span>
+          </span>
         </div>
       </footer>
-
-      {/* EXPRESSIONS WRITING GUIDE DIALOG MODAL (PORTABLE INTERATIVE MODAL) */}
-      <AnimatePresence>
-        {showGuide && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            
-            {/* Backdrop cover blur */}
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowGuide(false)}
-              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"
-            />
-
-            {/* Content card */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-slate-900 border border-slate-800 w-full max-w-xl rounded-2xl shadow-2xl relative overflow-hidden z-10"
-            >
-              {/* Guide Header */}
-              <div className="border-b border-slate-800 p-5 flex items-center justify-between gap-2.5">
-                <div className="flex items-center gap-2">
-                  <HelpCircle className="h-5 w-5 text-sky-400" />
-                  <h3 className="text-md font-bold text-slate-100">{t.guideTitle}</h3>
-                </div>
-                <button
-                  onClick={() => setShowGuide(false)}
-                  className="text-slate-400 hover:text-slate-200 p-1 bg-slate-800 border border-slate-700/80 rounded transition cursor-pointer"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Guide Content body scroll */}
-              <div className="p-5 overflow-y-auto max-h-[70vh] space-y-4 text-xs leading-relaxed text-slate-300">
-                <p className="font-semibold text-slate-400">
-                  {t.guideMathNote}
-                </p>
-
-                <div className="space-y-2 border-t border-slate-800 pt-3">
-                  {[
-                    { c: '+, -, *, /', dAr: 'الجمع، الطرح، الضرب، والقسمة العادية.', dEn: 'Basic Arithmetic operators' },
-                    { c: '^', dAr: 'معامل الأسس (مثال: x^2 تعني سين تربيع أو 2^3 تعني 2 أس 3).', dEn: 'Power exponent operator' },
-                    { c: 'sin(x), cos(x), tan(x)', dAr: 'الدوال المثلثية التقليدية للجيب وجيب التمام والظل (تستجيب لنظام RAD/DEG المختار).', dEn: 'Trigonometric functions (respects RAD/DEG toggle)' },
-                    { c: 'asin(x), acos(x), atan(x)', dAr: 'الدوال المثلثية العكسية للجيب وجيب التمام وظل الزاوية.', dEn: 'Inverse Trigonometric functions' },
-                    { c: 'log(x), ln(x)', dAr: 'اللوغاريتم العشري (أساس 10) واللوغاريتم الطبيعي (أساس e).', dEn: 'Decimal (Base-10) and Natural (Base-e) logarithms' },
-                    { c: 'sqrt(x), cbrt(x)', dAr: 'الجذر التربيعي والجذر التكعيبي للمعاملات الرياضية.', dEn: 'Square root and cube root functions' },
-                    { c: 'abs(x), exp(x)', dAr: 'القيمة المطلقة للدالة، والدالة الأسية للعدد الطبيعي e^x.', dEn: 'Absolute value and Euler natural exponential power' },
-                    { c: 'x!', dAr: 'مضروب الأعداد الصحيحة (مثال: 5! تعني 120).', dEn: 'Factorial of positive integer numbers' },
-                    { c: 'π, e', dAr: 'الثوابت الرياضية الافتراضية الجاهزة.', dEn: 'Standard physical mathematical constants Pi & Euler' },
-                  ].map((row, i) => (
-                    <div key={i} className="flex flex-col gap-1 bg-slate-950/40 p-2.5 rounded border border-slate-850">
-                      <code className="text-sky-400 font-mono font-bold text-[13px]">{row.c}</code>
-                      <div className="text-slate-300 font-semibold">{row.dAr}</div>
-                      <div className="text-slate-500 font-mono text-[10px]">{row.dEn}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Close button panel */}
-              <div className="border-t border-slate-800 p-4 bg-slate-950/20 text-right">
-                <button
-                  onClick={() => setShowGuide(false)}
-                  className="px-5 py-2 text-xs font-bold leading-none bg-sky-500 hover:bg-sky-400 text-slate-950 border border-sky-600 rounded-lg cursor-pointer"
-                >
-                  {t.guideClose}
-                </button>
-              </div>
-            </motion.div>
-            
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* GLOBALLY FLOATING COPY/INSERT INDICATOR NOTIFICATION BADGE */}
-      <AnimatePresence>
-        {showCopiedBadge && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 30, scale: 0.9 }}
-            className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 bg-slate-905 border border-emerald-500/35 text-emerald-400 font-bold text-xs md:text-sm shadow-xl shadow-slate-950/50 px-5 py-3 rounded-full flex items-center gap-2"
-          >
-            <Check className="h-4 w-4 bg-emerald-500/10 text-emerald-400 p-0.5 rounded-full border border-emerald-500/25" />
-            <span>{t.insertedLabel}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
     </div>
   );

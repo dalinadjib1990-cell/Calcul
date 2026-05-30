@@ -1,0 +1,99 @@
+{
+  "entities": {
+    "GlobalSettings": {
+      "title": "Global Settings",
+      "description": "App-wide system settings maintained by the admins including profile image, welcome message, and rotating API keys.",
+      "type": "object",
+      "properties": {
+        "profileImageUrl": {
+          "type": "string",
+          "description": "URL of the Al-Moalem's profile picture stored on Cloudinary."
+        },
+        "welcomeMessage": {
+          "type": "string",
+          "description": "Arabic welcome message spoken by الأستاذ دالي."
+        },
+        "geminiKeys": {
+          "type": "array",
+          "description": "List of active Gemini API keys for round-robin or question-based rotating balance."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedBy": {
+          "type": "string"
+        }
+      },
+      "required": ["profileImageUrl", "welcomeMessage", "geminiKeys"]
+    },
+    "ChatSession": {
+      "title": "Chat Session",
+      "description": "A conversation thread initiated by a student to interact with Al-Moalem DZ.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "userEmail": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastMessageAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "userEmail", "title", "createdAt", "lastMessageAt"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "A single entry in a chat session thread, either from the student or Al-Moalem.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sender": {
+          "type": "string",
+          "enum": ["student", "teacher"]
+        },
+        "text": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Optional Cloudinary uploaded image URL attached to the message."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["sender", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/settings/global": {
+      "schema": "GlobalSettings",
+      "description": "Singleton global settings configuration."
+    },
+    "/sessions/{sessionId}": {
+      "schema": "ChatSession",
+      "description": "Conversations list."
+    },
+    "/sessions/{sessionId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Individual messages under a specific conversation."
+    }
+  }
+}

@@ -1,12 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Plus Jakarta Sans", "Cairo", system-ui, sans-serif;
+  --font-sans: "Cairo", "Plus Jakarta Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 }
 
-/* Custom scrollbar styling for history panel */
+/* Custom scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -15,9 +15,54 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(156, 163, 175, 0.25);
+  background: rgba(16, 185, 129, 0.2);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(156, 163, 175, 0.45);
+  background: rgba(16, 185, 129, 0.4);
+}
+
+/* Markdown parsing custom designs */
+.markdown-body {
+  line-height: 1.8;
+  font-size: 0.95rem;
+}
+.markdown-body p {
+  margin-bottom: 0.75rem;
+}
+.markdown-body strong {
+  color: #10b981;
+  font-weight: 700;
+}
+.markdown-body ul, .markdown-body ol {
+  margin-right: 1.5rem;
+  margin-bottom: 0.75rem;
+  list-style-type: decimal;
+}
+.markdown-body ul {
+  list-style-type: disc;
+}
+.markdown-body li {
+  margin-bottom: 0.25rem;
+}
+.markdown-body code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background-color: rgba(255, 255, 255, 0.08);
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem;
+  color: #fb7185;
+}
+.markdown-body pre {
+  background-color: #0b0f19;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.markdown-body pre code {
+  background-color: transparent;
+  padding: 0;
+  color: #f1f5f9;
 }
