@@ -8,6 +8,7 @@ import {
   auth, 
   db, 
   signInWithGoogle, 
+  signInStudentAnonymously,
   logoutUser, 
   OperationType, 
   handleFirestoreError 
@@ -55,7 +56,7 @@ import { ChatSession, ChatMessage, GlobalSettings } from './types';
 import FunctionStudyCorner from './components/FunctionStudyCorner';
 
 // Default teacher profile avatar (Algerian colors / theme) if none is configured
-const DEFAULT_AVATAR = "https://res.cloudinary.com/doaxziqm7/image/upload/v1716912345/almoalem_placeholder.png";
+const DEFAULT_AVATAR = "https://res.cloudinary.com/doaxziqm7/image/upload/v1716912345/almoalem_pwa_icon_512.png";
 const DEFAULT_WELCOME = "مرحبا انا الاستاذ دالي نجيب، ماذا تريد ان اشرح لك اليوم او كيف يمككني مساعدتك؟";
 
 export default function App() {
@@ -144,13 +145,38 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
+  const [studentSignInLoading, setStudentSignInLoading] = useState(false);
+  const [studentSignInError, setStudentSignInError] = useState<string | null>(null);
+
+  const handleStudentQuickSignIn = async () => {
+    setStudentSignInLoading(true);
+    setStudentSignInError(null);
+    try {
+      await signInStudentAnonymously();
+    } catch (err: any) {
+      console.error("Student fast entry error:", err);
+      setStudentSignInError(err?.message || "فشل الدخول السريع. الرجاء المحاولة مجدداً.");
+    } finally {
+      setStudentSignInLoading(false);
+    }
+  };
+
   const triggerPwaInstallation = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log('[PWA] User response:', outcome);
-    setDeferredPrompt(null);
-    setPwaInstallable(false);
+    if (!deferredPrompt) {
+      // Always fallback to beautiful direct step-by-step instructions so students on iOS Safari or Chrome can install!
+      setShowPwaGuide(true);
+      return;
+    }
+    try {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log('[PWA] User response:', outcome);
+      setDeferredPrompt(null);
+      setPwaInstallable(false);
+    } catch (err) {
+      console.warn("PWA prompt interaction skipped:", err);
+      setShowPwaGuide(true);
+    }
   };
 
   // Sync Global Settings
@@ -755,10 +781,10 @@ export default function App() {
             <div className="flex items-center gap-1.5 md:hidden shrink-0">
               <button
                 onClick={triggerPwaInstallation}
-                className="p-1.5 text-blue-400 hover:text-blue-300 bg-blue-950/40 rounded-lg border border-blue-900/30 transition shadow-inner shadow-blue-500/10"
+                className="p-1.5 text-blue-400 hover:text-blue-300 bg-blue-950/40 rounded-lg border border-blue-900/30 transition shadow-inner shadow-blue-500/10 hover:scale-105 active:scale-95"
                 title="تثبيت تطبيق المعلم DZ الأستاذ دالي"
               >
-                <Download className="h-4 w-4 animate-bounce" />
+                <Download className="h-4 w-4 text-blue-400 animate-pulse" />
               </button>
               {user ? (
                 <button
@@ -770,10 +796,10 @@ export default function App() {
                 </button>
               ) : (
                 <button
-                  onClick={signInWithGoogle}
-                  className="px-2 py-1.5 text-[10px] font-bold bg-blue-600 text-white rounded-lg transition"
+                  onClick={handleStudentQuickSignIn}
+                  className="px-2.5 py-1.5 text-[10px] font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition active:scale-95 flex items-center gap-1"
                 >
-                  دخول
+                  <span>دخول المذاكرة ⚡</span>
                 </button>
               )}
             </div>
@@ -813,10 +839,10 @@ export default function App() {
             <div className="hidden md:flex items-center gap-2">
               <button
                 onClick={triggerPwaInstallation}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-xl transition-all shadow-md shadow-blue-600/30 border border-blue-500 hover:scale-105"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-xl transition-all shadow-md shadow-blue-600/30 border border-blue-500 hover:scale-[1.03]"
                 title="تثبيت التطبيق مباشرة"
               >
-                <Download className="h-4 w-4 animate-bounce" />
+                <Download className="h-4 w-4 text-white animate-pulse" />
                 <span>تثبيت التطبيق 📱</span>
               </button>
 
@@ -868,17 +894,80 @@ export default function App() {
               </ul>
             </div>
 
-            <button
-              onClick={signInWithGoogle}
-              className="mt-8 flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-all shadow-lg shadow-blue-600/10 border border-blue-500"
-            >
-              <LogIn className="h-5 w-5" />
-              <span>ابدأ الدراسة الآن (دخول بحساب جوجل)</span>
-            </button>
-            
-            <span className="text-[10px] text-slate-500 mt-4 block">
-              للولوج للوحة التحكم كأستاذ، يرجى تسجيل الدخول بأحد البريدين المعتمدين.
-            </span>
+            {/* Direct PWA Mobile Install Banner / Card - Visible Before Login */}
+            <div className="w-full mt-6 bg-[#0c1a3b]/40 p-4 rounded-2xl border border-blue-500/30 text-right flex flex-col sm:flex-row items-center gap-4 shadow-xl">
+              <img 
+                src="https://res.cloudinary.com/doaxziqm7/image/upload/v1716912345/almoalem_pwa_icon_512.png" 
+                alt="شعار التطبيق" 
+                className="w-14 h-14 rounded-xl border border-blue-400 shadow-md object-cover shrink-0"
+              />
+              <div className="flex-1 space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] bg-blue-500/20 text-blue-300 font-bold px-2 py-0.5 rounded-full border border-blue-500/30">تطبيق أندرويد متوفر 📱</span>
+                  <span className="text-[10px] bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded-full border border-slate-700">تثبيت فوري كأندرويد</span>
+                </div>
+                <h3 className="text-xs font-bold text-slate-200">تنزيل وتثبيت تطبيق "المعلم DZ"</h3>
+                <p className="text-[10px] text-slate-400 leading-relaxed">تابع دراستك كبرنامج سريع مستقل ومباشر على شاشة هاتفك دون شريط المتصفح!</p>
+              </div>
+              <button
+                onClick={triggerPwaInstallation}
+                className="w-full sm:w-auto px-4 py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl transition-all shadow-md shadow-emerald-600/20 border border-emerald-500 shrink-0 flex items-center justify-center gap-1.5 hover:scale-[1.02]"
+              >
+                <Download className="w-4 h-4 text-white animate-pulse" />
+                <span>تثبيت التطبيق الآن 📱</span>
+              </button>
+            </div>
+
+            {/* Dual Login Pathways */}
+            <div className="mt-8 w-full space-y-4 max-w-md">
+              {/* Path 1: Primary fast entry for الطلاب/المتمدرسين without account */}
+              <div className="space-y-1.5">
+                <button
+                  onClick={handleStudentQuickSignIn}
+                  disabled={studentSignInLoading}
+                  className="w-full py-3.5 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-sm rounded-xl transition-all shadow-lg shadow-blue-600/20 border border-blue-500 active:scale-95 flex items-center justify-center gap-2"
+                >
+                  {studentSignInLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <Sparkles className="h-4 w-4 text-amber-300 animate-pulse" />
+                  )}
+                  <span>دخول سريع للتلاميذ (دون فتح حساب) ⚡</span>
+                </button>
+                <span className="text-[10px] text-emerald-400 font-mono block text-center">
+                  دخول مباشر فوري مستقل! يحفظ محادثاتك مفرزة وخاصة بك بني.
+                </span>
+                {studentSignInError && (
+                  <p className="text-[11px] text-rose-400 font-medium text-center bg-rose-950/20 p-2 rounded-lg border border-rose-900/40 mt-1">
+                    {studentSignInError}
+                  </p>
+                )}
+              </div>
+
+              <div className="relative py-2">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-800"></div>
+                </div>
+                <div className="relative flex justify-center text-[10px]">
+                  <span className="px-2.5 bg-[#080d19] text-slate-500 font-mono">أو الدخول التعليمي للمعلمين والاستاذ</span>
+                </div>
+              </div>
+
+              {/* Path 2: Teacher Google Entry exclusively */}
+              <div>
+                <button
+                  onClick={signInWithGoogle}
+                  className="w-full py-2.5 px-4 bg-[#0a1124] hover:bg-slate-900 text-slate-300 hover:text-white font-bold text-xs rounded-xl transition-all border border-slate-800 hover:border-slate-700 active:scale-95 flex items-center justify-center gap-1.5"
+                >
+                  <LogIn className="h-4 w-4 text-blue-400" />
+                  <span>دخول بحساب جوجل (أستاذ / معلّم) 🏫</span>
+                </button>
+                <p className="text-[9px] text-slate-500 text-center mt-1">
+                  خاص بالأستاذ دالي نجيب لولوج لوحة تحكّم ومعاينة الطلاب وإدارة المفاتيح.
+                </p>
+              </div>
+            </div>
+
           </div>
         ) : (
           /* Logged In Workspace */

@@ -3,7 +3,7 @@
  */
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -55,6 +55,46 @@ export async function signInWithGoogle() {
     return result.user;
   } catch (error) {
     console.error('Sign in with Google error:', error);
+    throw error;
+  }
+}
+
+// Sign in Student anonymously or with automated custom credentials fallback
+export async function signInStudentAnonymously() {
+  try {
+    // 1. Try Firebase Anonymous Authentication first which is perfect
+    try {
+      const result = await signInAnonymously(auth);
+      return result.user;
+    } catch (anonError: any) {
+      console.warn('Anonymous Auth failed or disabled in Firebase Console. Trying automated fast credentials onboarding:', anonError);
+      
+      // 2. Fallback to a localized, unique student session registered via Firebase Auth
+      let studentEmail = localStorage.getItem('almoalem_student_email');
+      let studentPassword = localStorage.getItem('almoalem_student_pass');
+      
+      if (!studentEmail || !studentPassword) {
+        const randNum = Math.floor(Math.random() * 9000000) + 1000000;
+        studentEmail = `taleb_${randNum}@almoalem.dz`;
+        studentPassword = `talebPass_${randNum}_DZ`;
+        localStorage.setItem('almoalem_student_email', studentEmail);
+        localStorage.setItem('almoalem_student_pass', studentPassword);
+      }
+      
+      try {
+        const signResult = await signInWithEmailAndPassword(auth, studentEmail, studentPassword);
+        return signResult.user;
+      } catch (signError: any) {
+        // If not registered yet, create it on the fly
+        if (signError.code === 'auth/user-not-found' || signError.code === 'auth/invalid-credential') {
+          const createResult = await createUserWithEmailAndPassword(auth, studentEmail, studentPassword);
+          return createResult.user;
+        }
+        throw signError;
+      }
+    }
+  } catch (error) {
+    console.error('Student Quick Sign-In failed completely:', error);
     throw error;
   }
 }
