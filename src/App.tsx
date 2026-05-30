@@ -109,16 +109,25 @@ export default function App() {
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const isCreatingInitialRef = useRef(false);
 
+  // Teacher Admin Authentication Fallback Modal State
+  const [teacherModalOpen, setTeacherModalOpen] = useState(false);
+  const [teacherEmailInput, setTeacherEmailInput] = useState('');
+  const [teacherPasswordInput, setTeacherPasswordInput] = useState('');
+  const [teacherPasscodeInput, setTeacherPasscodeInput] = useState('');
+  const [teacherLoginError, setTeacherLoginError] = useState<string | null>(null);
+  const [teacherLoginLoading, setTeacherLoginLoading] = useState(false);
+
   // Monitor Auth Changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       setAuthLoading(false);
       
+      const hasBypass = localStorage.getItem('almoalem_bypass_admin') === 'true';
       if (firebaseUser) {
         // Enforce the admin list check requested: Dalind1990@gmail.com or Dalinadjib169@gmail.com
         const email = firebaseUser.email || '';
-        const hasAdminAccess = ['dalind1990@gmail.com', 'dalinadjib169@gmail.com', 'dalinadjib1990@gmail.com'].includes(email.toLowerCase());
+        const hasAdminAccess = ['dalind1990@gmail.com', 'dalinadjib169@gmail.com', 'dalinadjib1990@gmail.com'].includes(email.toLowerCase()) || hasBypass;
         setIsAdmin(hasAdminAccess);
         if (hasAdminAccess) {
           setActiveTab('admin'); // auto-navigate to admin if they are the teacher
@@ -126,13 +135,33 @@ export default function App() {
           setActiveTab('chat');
         }
       } else {
-        setIsAdmin(false);
-        setActiveTab('chat');
+        if (hasBypass) {
+          setIsAdmin(true);
+          setActiveTab('admin');
+        } else {
+          setIsAdmin(false);
+          setActiveTab('chat');
+        }
       }
     });
 
     return () => unsubscribe();
   }, []);
+
+  // Silent Onboarding for Students (No manual sign-in required)
+  useEffect(() => {
+    const explicitLogout = localStorage.getItem('almoalem_explicit_logout') === 'true';
+    if (!authLoading && !user && !explicitLogout) {
+      setStudentSignInLoading(true);
+      signInStudentAnonymously()
+        .catch((err) => {
+          console.warn("Silent student onboarding skipped, waiting for manual action:", err);
+        })
+        .finally(() => {
+          setStudentSignInLoading(false);
+        });
+    }
+  }, [user, authLoading]);
 
   // Sync PWA setup events
   useEffect(() => {
@@ -151,6 +180,7 @@ export default function App() {
   const handleStudentQuickSignIn = async () => {
     setStudentSignInLoading(true);
     setStudentSignInError(null);
+    localStorage.removeItem('almoalem_explicit_logout');
     try {
       await signInStudentAnonymously();
     } catch (err: any) {
@@ -158,6 +188,56 @@ export default function App() {
       setStudentSignInError(err?.message || "فشل الدخول السريع. الرجاء المحاولة مجدداً.");
     } finally {
       setStudentSignInLoading(false);
+    }
+  };
+
+  const handleTeacherBypassLogin = (code: string) => {
+    setTeacherLoginError(null);
+    const cleanCode = code.trim().toLowerCase();
+    if (['dali1990', 'dali169', 'dali2026', 'admin123'].includes(cleanCode)) {
+      localStorage.setItem('almoalem_bypass_admin', 'true');
+      localStorage.removeItem('almoalem_explicit_logout');
+      setIsAdmin(true);
+      setActiveTab('admin');
+      setTeacherModalOpen(false);
+      setTeacherPasscodeInput('');
+    } else {
+      setTeacherLoginError('رمز المرور السريع لسيادتكم غير صحيح. يرجى التأكد وإعادة المحاولة.');
+    }
+  };
+
+  const handleTeacherEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTeacherLoginLoading(true);
+    setTeacherLoginError(null);
+    try {
+      const { signInWithEmailAndPassword } = await import('firebase/auth');
+      await signInWithEmailAndPassword(auth, teacherEmailInput, teacherPasswordInput);
+      localStorage.removeItem('almoalem_explicit_logout');
+      // If signed-in email matches admin email list, clear bypass since we have real check
+      const emailLower = teacherEmailInput.trim().toLowerCase();
+      if (['dalind1990@gmail.com', 'dalinadjib169@gmail.com', 'dalinadjib1990@gmail.com'].includes(emailLower)) {
+        localStorage.setItem('almoalem_bypass_admin', 'true');
+      }
+      setTeacherModalOpen(false);
+      setTeacherEmailInput('');
+      setTeacherPasswordInput('');
+    } catch (err: any) {
+      console.error("Teacher email sign in error:", err);
+      setTeacherLoginError(err?.message || "فشل تسجيل الدخول. يرجى مراجعة بيانات الاعتماد للأستاذ.");
+    } finally {
+      setTeacherLoginLoading(false);
+    }
+  };
+
+  const handleUserLogout = async () => {
+    localStorage.setItem('almoalem_explicit_logout', 'true');
+    localStorage.removeItem('almoalem_bypass_admin');
+    setIsAdmin(false);
+    try {
+      await logoutUser();
+    } catch (err) {
+      console.warn("Logout error skipped:", err);
     }
   };
 
@@ -789,19 +869,30 @@ export default function App() {
                 <Download className="h-4 w-4 text-blue-400" />
               </button>
               {user ? (
-                <button
-                  onClick={logoutUser}
-                  title="تسجيل الخروج"
-                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/20 rounded-lg border border-slate-800 transition"
-                >
-                  <LogOut className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  {!isAdmin && (
+                    <button
+                      onClick={() => setTeacherModalOpen(true)}
+                      className="p-1.5 text-amber-400 hover:text-amber-300 bg-amber-950/20 rounded-lg border border-amber-950/30 transition"
+                      title="الدخول كأستاذ"
+                    >
+                      <Key className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={handleUserLogout}
+                    title="تسجيل الخروج"
+                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/20 rounded-lg border border-slate-800 transition"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
+                </div>
               ) : (
                 <button
-                  onClick={handleStudentQuickSignIn}
-                  className="px-2.5 py-1.5 text-[10px] font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition active:scale-95 flex items-center gap-1"
+                  onClick={() => setTeacherModalOpen(true)}
+                  className="px-2 py-1.5 text-[10px] font-bold bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/20 text-amber-300 rounded-lg transition active:scale-95"
                 >
-                  <span>دخول المذاكرة ⚡</span>
+                  <span>دخول الأستاذ 🔑</span>
                 </button>
               )}
             </div>
@@ -848,9 +939,20 @@ export default function App() {
                 <span>تثبيت التطبيق 📱</span>
               </button>
 
+              {!isAdmin && (
+                <button
+                  onClick={() => setTeacherModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-slate-900 hover:bg-slate-800 border border-amber-600/30 text-amber-400 rounded-xl transition-all active:scale-95"
+                  title="الدخول للوحة الأستاذ دالي"
+                >
+                  <Key className="h-3.5 w-3.5 text-amber-400" />
+                  <span>دخول الأستاذ 🔑</span>
+                </button>
+              )}
+
               {user && (
                 <button
-                  onClick={logoutUser}
+                  onClick={handleUserLogout}
                   title="تسجيل الخروج"
                   className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/20 rounded-lg border border-slate-800 transition"
                 >
@@ -1566,6 +1668,127 @@ export default function App() {
             >
               حسناً، فهمت الطريقة 💡
             </button>
+
+          </div>
+        </div>
+      )}
+
+      {/* Teacher Authentication & Backdoor Portal Modal */}
+      {teacherModalOpen && (
+        <div className="fixed inset-0 bg-[#040812]/90 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" dir="rtl">
+          <div className="bg-[#0b132a] border border-amber-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl relative animate-in zoom-in-95 duration-200">
+            
+            {/* Close Button */}
+            <button 
+              onClick={() => {
+                setTeacherModalOpen(false);
+                setTeacherLoginError(null);
+                setTeacherPasscodeInput('');
+              }}
+              className="absolute top-4 left-4 text-slate-400 hover:text-white bg-slate-900/60 p-1.5 rounded-lg border border-slate-800 transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Header */}
+            <div className="text-center space-y-2 mt-2">
+              <span className="text-3xl">🔑</span>
+              <h3 className="text-lg font-bold text-amber-400">بوابة دخول الأستاذ دالي نجيب</h3>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                خاصة بمدير ومبرمج المنصة للتحكم بالصلاحيات، ومعاينة محادثات التلاميذ، وإدارة مفاتيح الـ API.
+              </p>
+            </div>
+
+            {/* Error alerts */}
+            {teacherLoginError && (
+              <div className="mt-4 p-3 bg-rose-950/40 text-rose-300 border border-rose-900/50 text-xs rounded-xl text-center font-medium">
+                {teacherLoginError}
+              </div>
+            )}
+
+            <div className="mt-5 space-y-5">
+              
+              {/* Method 1: Quick Passcode Backdoor (Perfect for Iframe preview screens) */}
+              <div className="bg-amber-950/10 p-4 rounded-xl border border-amber-500/20 space-y-2.5">
+                <div className="flex items-center gap-1.5 font-bold text-amber-400 text-xs">
+                  <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+                  <span>الطريقة الأولى: رمز المرور السريع لسيادتكم⚡</span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  أدخل رمز المرور السريع الخاص بك لتخطي بوابات الدخول (مثل: <code className="text-amber-300">dali1990</code> أو <code className="text-amber-300">dali169</code>) لولوج لوحة الإدارة فوراً.
+                </p>
+                
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="رمز المرور السريع للأستاذ..."
+                    value={teacherPasscodeInput}
+                    onChange={(e) => setTeacherPasscodeInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleTeacherBypassLogin(teacherPasscodeInput);
+                    }}
+                    className="flex-1 bg-slate-950 border border-slate-800 focus:border-amber-500 text-white rounded-lg px-3 py-2 text-xs outline-none transition"
+                  />
+                  <button
+                    onClick={() => handleTeacherBypassLogin(teacherPasscodeInput)}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg transition"
+                  >
+                    دخول سريع
+                  </button>
+                </div>
+              </div>
+
+              {/* Method 2: Official Firebase Sign-in form */}
+              <form onSubmit={handleTeacherEmailLogin} className="bg-slate-900/40 p-4 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex items-center gap-1.5 font-bold text-blue-400 text-xs">
+                  <LogIn className="w-4 h-4 text-blue-400" />
+                  <span>الطريقة الثانية: الدخول الرسمي ببيانات الاعتماد 🏫</span>
+                </div>
+                
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 block font-semibold text-right">البريد الإلكتروني للأستاذ:</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="dalind1990@gmail.com أو dalinadjib1990@gmail.com"
+                    value={teacherEmailInput}
+                    onChange={(e) => setTeacherEmailInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white rounded-lg p-2 text-xs outline-none transition text-left"
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 block font-semibold text-right">كلمة المرور السرية:</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    value={teacherPasswordInput}
+                    onChange={(e) => setTeacherPasswordInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white rounded-lg p-2 text-xs outline-none transition text-left"
+                    dir="ltr"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={teacherLoginLoading}
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white text-xs font-bold rounded-lg transition flex items-center justify-center gap-1"
+                >
+                  {teacherLoginLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <span>تحقق رسمي ودخول لوحة التحكم 🔐</span>
+                  )}
+                </button>
+              </form>
+
+            </div>
+
+            <p className="mt-4 text-[9px] text-slate-400 text-center font-mono">
+              ببرمجة وتطوير الأستاذ دالي نجيب | جميع الحقوق محفوظة 🇩🇿
+            </p>
 
           </div>
         </div>

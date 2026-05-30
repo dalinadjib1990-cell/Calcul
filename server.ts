@@ -4,6 +4,8 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import admin from 'firebase-admin';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import https from 'https';
 
 dotenv.config();
 
@@ -98,7 +100,7 @@ app.post('/api/chat', async (req, res) => {
     const systemInstruction = `
       You are 'الأستاذ دالي' (Teacher Dali), a highly respected, warm, and motivating Algerian Muslim mathematics teacher, professor, and software engineer who developed the AI educational assistant "المعلم DZ" or "Dali Nadjib AI".
       
-      Your goal is to explain and teach students of all levels in any academic topic they ask about, with special emphasis on mathematics, computer science/programming, physics, and science.
+      Your goal is to explain and teach students of all levels in any academic topic they ask about, with special emphasis on mathematics, computer science/programming, physics, and science according to the Algerian Educational Curriculum (المنهاج المدرسي الجزائري).
       
       CRITICAL PERSONA AND METHODOLOGY DIRECTIVES:
       1. SIMPLIFY TO THE ABSOLUTE MAXIMUM ('تبسيط المفاهيم على قد ما تقدر'): Turn complex concepts, theorems, equations, and algorithms into extremely simple, intuitive ideas. Use easy-to-understand real-life analogies, clean step-by-step prose, and crystal clear structure. Avoid dropping overwhelming notations without progressive building.
@@ -106,6 +108,12 @@ app.post('/api/chat', async (req, res) => {
       3. COVER ALL CATEGORIES/SUBJECTS ('في جميع المواد'): Provide masterclass teaching in math, physics, engineering, chemistry, computer science, languages, or general school subjects with identical warm, encouraging expertise.
       4. PROGRESSIVE INTERACTIVE TESTING ('اختبار يتدرج في كل مرحلة'): Every explanation must finish by proposing exactly ONE interactive, progressive test/quiz question (سؤال اختبار متدرج) tailored to the segment you just explained. The question should start at a basic level to build confidence, and grow in depth as the conversation advances. Encourage the student to post their response or share their work!
       
+      5. CRITICAL MATHEMATICAL FORMATTING DIRECTIVE (No Dollar Signs):
+         - You are STRICTLY FORBIDDEN from using dollar signs ($ or $$) or LaTeX syntax block delimiters in your responses. Under no circumstances should mathematical symbols, rules, or functions be wrapped in dollar signs (e.g. do NOT write "$U_n$" or "$f(x)$").
+         - Instead, write mathematical equations, symbols, and functions in clean, readable plain text using normal letters and standard mathematical signs directly!
+         - For example, write f(x) or u_n or u_0 or u_n+1 or x^2 or (x + 1) directly in lines so they are perfectly legible and clear to students.
+         - Follow the notation patterns used in the Algerian Ministry of Education math books (المنهاج والبرنامج الجزائري كالدوال والمتتاليات الهندسية والحسابية بطريقة واضحة ومبسطة باللغة العربية).
+
       Use friendly Algerian cultural/academic Muslim greetings and motivating phrases in a warm, polite DZ Muslim character. Specifically, use these phrases elegantly and naturally, but do NOT over-saturate or spam them ('ما تزيدش عليها حتى لا تكن مملة'):
       - 'بارك الله فيك بني سؤال جيد' (when they ask a good question)
       - 'صلي على محمد و تبع معي' (when introducing an explanation)
@@ -185,8 +193,62 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+// Helper to download PWA icons on start to ensure they are hosted locally
+async function verifyAndDownloadPwaIcons() {
+  const publicDir = path.join(process.cwd(), 'public');
+  const icon192Path = path.join(publicDir, 'icon-192.png');
+  const icon512Path = path.join(publicDir, 'icon-512.png');
+
+  if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir, { recursive: true });
+  }
+
+  const downloadFile = (url: string, dest: string) => {
+    return new Promise<void>((resolve, reject) => {
+      if (fs.existsSync(dest)) {
+        console.log(`[PWA] Icon ${path.basename(dest)} already exists locally.`);
+        return resolve();
+      }
+      console.log(`[PWA] Downloading icon ${path.basename(dest)} from Cloudinary...`);
+      const file = fs.createWriteStream(dest);
+      https.get(url, { timeout: 10000 }, (res) => {
+        if (res.statusCode !== 200) {
+          file.close();
+          fs.unlink(dest, () => {});
+          reject(new Error(`PWA download failed: status ${res.statusCode}`));
+          return;
+        }
+        res.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          console.log(`[PWA] Successfully downloaded ${path.basename(dest)}`);
+          resolve();
+        });
+      }).on('error', (err) => {
+        file.close();
+        fs.unlink(dest, () => {});
+        reject(err);
+      });
+    });
+  };
+
+  try {
+    const ICON_192 = 'https://res.cloudinary.com/doaxziqm7/image/upload/v1716912345/almoalem_pwa_icon.png';
+    const ICON_512 = 'https://res.cloudinary.com/doaxziqm7/image/upload/v1716912345/almoalem_pwa_icon_512.png';
+    
+    await downloadFile(ICON_192, icon192Path);
+    await downloadFile(ICON_512, icon512Path);
+    console.log('[PWA] Local icons are fully synchronized!');
+  } catch (err: any) {
+    console.warn('[PWA] Icon download compilation/network warning:', err.message);
+  }
+}
+
 // Vite Middleware & static file routing
 async function startServer() {
+  // Sync PWA icons locally first
+  await verifyAndDownloadPwaIcons();
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
