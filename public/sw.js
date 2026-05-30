@@ -19,16 +19,47 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  // Clear any old caches immediately during activation to force fresh assets
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cache) => {
+          console.log('[Service Worker] Clearing old cache:', cache);
+          return caches.delete(cache);
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('fetch', (event) => {
-  // Let standard requests flow directly, can fallback to cache if offline
+  // We only intercept standard GET requests and exclude backend APIs
+  if (event.request.method !== 'GET' || event.request.url.includes('/api/')) {
+    return;
+  }
+
+  // Network-First strategy: Always query the network first to get live/fresh builds.
+  // Fall back to cached resources only if the client is completely offline.
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      return cachedResponse || fetch(event.request);
-    }).catch(() => {
-      // Offline fallback can be added if offline
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        // Cache the newly fetched resource if it's a valid ok response
+        if (networkResponse.status === 200) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        // Network was unreachable - retrieve from cache
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          // If offline and request is for a page, return a basic offline message or let it fail gently
+        });
+      })
   );
 });
