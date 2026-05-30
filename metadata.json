@@ -1,0 +1,6 @@
+{
+  "name": "Scientific Calculator",
+  "description": "A beautiful, feature-rich scientific calculator with graphing capabilities, unit conversions, constants, and calculation history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
