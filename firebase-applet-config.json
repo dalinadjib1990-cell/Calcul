@@ -1,10 +1,10 @@
 {
-  "projectId": "universal-gearbox-45xj8",
-  "appId": "1:532000019410:web:92f2f40ee0f11ab0af6e0b",
-  "apiKey": "AIzaSyA1Q_FOaIEaQdSDdxX_ov1b4ny_0O39HzU",
-  "authDomain": "universal-gearbox-45xj8.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-21efe31e-e88a-471c-a866-eb63211f0f51",
-  "storageBucket": "universal-gearbox-45xj8.firebasestorage.app",
-  "messagingSenderId": "532000019410",
+  "projectId": "gen-lang-client-0694864679",
+  "appId": "1:233520604904:web:eec44d74b8d9b147094b5d",
+  "apiKey": "AIzaSyAkqsGPlm3rbVXzhbqas7qxDDk060Y3cc4",
+  "authDomain": "gen-lang-client-0694864679.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0694864679.firebasestorage.app",
+  "messagingSenderId": "233520604904",
+  "firestoreDatabaseId": "(default)",
   "measurementId": ""
 }

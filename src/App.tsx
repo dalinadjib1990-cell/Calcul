@@ -59,6 +59,24 @@ import FunctionStudyCorner from './components/FunctionStudyCorner';
 const DEFAULT_AVATAR = "https://res.cloudinary.com/doaxziqm7/image/upload/v1716912345/almoalem_pwa_icon_512.png";
 const DEFAULT_WELCOME = "مرحبا انا الاستاذ دالي نجيب، ماذا تريد ان اشرح لك اليوم او كيف يمككني مساعدتك؟";
 
+/**
+ * Resolves mathematical formatted signs ($ and LaTeX delimiters) seamlessly 
+ * so students of all profiles get a clean, human-readable clear text.
+ */
+const formatStudentMathText = (txt: string): string => {
+  if (!txt) return '';
+  return txt
+    .replace(/\$\$/g, '')
+    .split(/\$/g).join('')
+    .replace(/\\\[/g, '')
+    .replace(/\\\]/g, '')
+    .replace(/\\\( /g, '')
+    .replace(/ \\\)/g, '')
+    .replace(/\\\(/g, '')
+    .replace(/\\\)/g, '')
+    .replace(/\\/g, '');
+};
+
 export default function App() {
   // Authentication & Users State
   const [user, setUser] = useState<User | null>(null);
@@ -141,6 +159,14 @@ export default function App() {
         } else {
           setIsAdmin(false);
           setActiveTab('chat');
+          
+          // Automatic seamless guest login for student so there is absolutely no blocking landing screen!
+          setUser({
+            uid: 'guest_student_local',
+            email: 'guest_student@almoalem.dz',
+            isAnonymous: true,
+            displayName: 'تلميذ زائر'
+          } as any);
         }
       }
     });
@@ -151,11 +177,22 @@ export default function App() {
   // Silent Onboarding for Students (No manual sign-in required)
   useEffect(() => {
     const explicitLogout = localStorage.getItem('almoalem_explicit_logout') === 'true';
-    if (!authLoading && !user && !explicitLogout) {
+    if (!authLoading && (!user || user.uid === 'guest_student_local') && !explicitLogout) {
       setStudentSignInLoading(true);
       signInStudentAnonymously()
+        .then((fbUser) => {
+          if (fbUser) {
+            setUser(fbUser);
+          }
+        })
         .catch((err) => {
-          console.warn("Silent student onboarding skipped, waiting for manual action:", err);
+          console.warn("Silent student onboarding failed, keeping local guest session:", err);
+          setUser({
+            uid: 'guest_student_local',
+            email: 'guest_student@almoalem.dz',
+            isAnonymous: true,
+            displayName: 'تلميذ زائر'
+          } as any);
         })
         .finally(() => {
           setStudentSignInLoading(false);
@@ -182,10 +219,17 @@ export default function App() {
     setStudentSignInError(null);
     localStorage.removeItem('almoalem_explicit_logout');
     try {
-      await signInStudentAnonymously();
+      const fbUser = await signInStudentAnonymously();
+      if (fbUser) setUser(fbUser);
     } catch (err: any) {
       console.error("Student fast entry error:", err);
-      setStudentSignInError(err?.message || "فشل الدخول السريع. الرجاء المحاولة مجدداً.");
+      // Fallback seamlessly to local guest so they don't get blocked
+      setUser({
+        uid: 'guest_student_local',
+        email: 'guest_student@almoalem.dz',
+        isAnonymous: true,
+        displayName: 'تلميذ زائر'
+      } as any);
     } finally {
       setStudentSignInLoading(false);
     }
@@ -239,11 +283,153 @@ export default function App() {
     } catch (err) {
       console.warn("Logout error skipped:", err);
     }
+    // Instantly switch to safe local guest user to prevent login gate wall
+    setUser({
+      uid: 'guest_student_local',
+      email: 'guest_student@almoalem.dz',
+      isAnonymous: true,
+      displayName: 'تلميذ زائر'
+    } as any);
+  };
+
+  // Offline Caching & Local Storage Backups Helpers
+  const loadLocalSessions = () => {
+    try {
+      const localSessListStr = localStorage.getItem('almoalem_local_sessions');
+      if (localSessListStr) {
+        setSessions(JSON.parse(localSessListStr));
+      } else {
+        const defaultSession = {
+          id: 'local_welcome_session',
+          userId: 'guest_student_local',
+          title: 'المساعد التعليمي - المعلم DZ 💡',
+          createdAt: new Date().toISOString(),
+          lastMessageAt: new Date().toISOString()
+        };
+        setSessions([defaultSession]);
+        localStorage.setItem('almoalem_local_sessions', JSON.stringify([defaultSession]));
+        
+        const defaultWelcomeMsg = {
+          id: 'local_msg_1',
+          sender: 'teacher',
+          text: globalSettings.welcomeMessage || DEFAULT_WELCOME,
+          createdAt: new Date().toISOString()
+        };
+        localStorage.setItem('almoalem_local_messages_local_welcome_session', JSON.stringify([defaultWelcomeMsg]));
+      }
+    } catch (e) {
+      console.warn("Local storage sessions load failed:", e);
+    }
+  };
+
+  const loadLocalMessages = (sessionId: string) => {
+    try {
+      const localMsgsStr = localStorage.getItem(`almoalem_local_messages_${sessionId}`);
+      if (localMsgsStr) {
+        setMessages(JSON.parse(localMsgsStr));
+      } else {
+        const defaultWelcomeMsg = {
+          id: 'local_msg_' + Date.now(),
+          sender: 'teacher',
+          text: globalSettings.welcomeMessage || DEFAULT_WELCOME,
+          createdAt: new Date().toISOString()
+        };
+        setMessages([defaultWelcomeMsg]);
+        localStorage.setItem(`almoalem_local_messages_${sessionId}`, JSON.stringify([defaultWelcomeMsg]));
+      }
+    } catch (e) {
+      console.warn("Local storage messages load failed:", e);
+    }
+    setMessagesLoading(false);
+    autoScrollToBottom();
+  };
+
+  const addSessionLocally = (title: string) => {
+    const newId = 'local_' + Date.now();
+    const newSession = {
+      id: newId,
+      userId: 'guest_student_local',
+      title: title,
+      createdAt: new Date().toISOString(),
+      lastMessageAt: new Date().toISOString()
+    };
+    
+    const currentListStr = localStorage.getItem('almoalem_local_sessions');
+    let list: any[] = [];
+    if (currentListStr) {
+      try { list = JSON.parse(currentListStr); } catch (e) {}
+    }
+    list = [newSession, ...list];
+    localStorage.setItem('almoalem_local_sessions', JSON.stringify(list));
+    setSessions(list);
+    
+    const defaultWelcomeMsg = {
+      id: 'local_msg_' + Date.now(),
+      sender: 'teacher',
+      text: globalSettings.welcomeMessage || DEFAULT_WELCOME,
+      createdAt: new Date().toISOString()
+    };
+    localStorage.setItem(`almoalem_local_messages_${newId}`, JSON.stringify([defaultWelcomeMsg]));
+    
+    return newId;
+  };
+
+  const addMessageLocally = (sessionId: string, sender: 'student' | 'teacher', text: string, imageUrl: string = '') => {
+    const newMsg = {
+      id: 'local_msg_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+      sender,
+      text,
+      imageUrl,
+      createdAt: new Date().toISOString()
+    };
+    
+    const key = `almoalem_local_messages_${sessionId}`;
+    const currentMsgsStr = localStorage.getItem(key);
+    let list: any[] = [];
+    if (currentMsgsStr) {
+      try { list = JSON.parse(currentMsgsStr); } catch (e) {}
+    }
+    list = [...list, newMsg];
+    localStorage.setItem(key, JSON.stringify(list));
+    
+    const sessStr = localStorage.getItem('almoalem_local_sessions');
+    if (sessStr) {
+      try {
+        let sessionsList = JSON.parse(sessStr);
+        sessionsList = sessionsList.map((s: any) => {
+          if (s.id === sessionId) {
+            return {
+              ...s,
+              lastMessageAt: new Date().toISOString(),
+              ...(sender === 'student' && text ? { title: text.substring(0, 30) + (text.length > 30 ? '...' : '') } : {})
+            };
+          }
+          return s;
+        });
+        localStorage.setItem('almoalem_local_sessions', JSON.stringify(sessionsList));
+        setSessions(sessionsList);
+      } catch (e) {}
+    }
+    
+    if (sessionId === activeSessionId || sessionId === viewingSessionId) {
+      setMessages(list);
+    }
+    
+    return newMsg;
   };
 
   const triggerPwaInstallation = async () => {
+    // If we are currently inside an iframe sandbox, we MUST break out to a clean separate tab
+    // in order for the browser to register the service worker and offer instant installation!
+    const isInsideIframe = window.self !== window.top;
+    if (isInsideIframe) {
+      window.open(window.location.href, '_blank');
+      return;
+    }
+
     if (!deferredPrompt) {
-      // Always fallback to beautiful direct step-by-step instructions so students on iOS Safari or Chrome can install!
+      // If we are already in a standalone tab but the browser is still loading the event,
+      // or if it's iOS Safari where custom events aren't available, show our simplified direct guidance.
       setShowPwaGuide(true);
       return;
     }
@@ -302,6 +488,11 @@ export default function App() {
   useEffect(() => {
     if (!user || isAdmin) return;
 
+    if (user.uid === 'guest_student_local') {
+      loadLocalSessions();
+      return;
+    }
+
     const path = 'sessions';
     const q = query(
       collection(db, path),
@@ -350,7 +541,8 @@ export default function App() {
         }
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
+      console.warn("Firestore sessions list query failed, falling back to local storage.", error);
+      loadLocalSessions();
     });
 
     return () => unsubscribe();
@@ -387,6 +579,11 @@ export default function App() {
       return;
     }
 
+    if (user?.uid === 'guest_student_local' || currentSession.startsWith('local_')) {
+      loadLocalMessages(currentSession);
+      return;
+    }
+
     setMessagesLoading(true);
     const path = `sessions/${currentSession}/messages`;
     const q = query(
@@ -403,12 +600,12 @@ export default function App() {
       setMessagesLoading(false);
       autoScrollToBottom();
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-      setMessagesLoading(false);
+      console.warn("Firestore messages snapshot failed, falling back to local storage.", error);
+      loadLocalMessages(currentSession);
     });
 
     return () => unsubscribe();
-  }, [activeSessionId, viewingSessionId]);
+  }, [activeSessionId, viewingSessionId, user]);
 
   const autoScrollToBottom = () => {
     setTimeout(() => {
@@ -420,6 +617,13 @@ export default function App() {
   const createNewChatRoom = async () => {
     if (!user) return;
     try {
+      if (user.uid === 'guest_student_local') {
+        const newId = addSessionLocally(`محادثة جديدة - ${new Date().toLocaleDateString('ar-DZ')}`);
+        setActiveSessionId(newId);
+        setDrawerOpen(false);
+        return;
+      }
+
       const path = 'sessions';
       const docRef = await addDoc(collection(db, path), {
         userId: user.uid,
@@ -440,7 +644,10 @@ export default function App() {
       setActiveSessionId(docRef.id);
       setDrawerOpen(false);
     } catch (error) {
-      console.error('Error creating new conversation:', error);
+      console.warn('Error creating new conversation in Firestore. Falling back to local storage:', error);
+      const newId = addSessionLocally(`محادثة جديدة - ${new Date().toLocaleDateString('ar-DZ')}`);
+      setActiveSessionId(newId);
+      setDrawerOpen(false);
     }
   };
 
@@ -464,17 +671,16 @@ export default function App() {
         const data = await response.json();
         setAttachedImageUrl(data.secure_url);
       } else {
-        alert('حدث خطأ في رفع الصورة إلى Cloudinary. تأكد من إعدادات الرفع.');
+        alert('حدث خطأ في رفع الصورة، يرجى إعادة المحاولة.');
       }
     } catch (err) {
-      console.error('Cloudinary Image upload error:', err);
-      alert('فشل الاتصال بخادم الصور Cloudinary.');
+      console.error('Image upload error:', err);
+      alert('حدث خطأ أثناء تحميل الصورة.');
     } finally {
       setUploadingImage(false);
     }
   };
 
-  // Send Student Message & Query standard server-side AI response
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if ((!inputText.trim() && !attachedImageUrl) || aiResponding) return;
@@ -487,10 +693,58 @@ export default function App() {
     setAiResponding(true);
 
     let sessionToUse = activeSessionId || viewingSessionId;
+    const isGuest = user?.uid === 'guest_student_local';
 
+    if (isGuest) {
+      if (!sessionToUse) {
+        sessionToUse = addSessionLocally(textToSend.substring(0, 30) + (textToSend.length > 30 ? '...' : ''));
+        setActiveSessionId(sessionToUse);
+      }
+      
+      // Save student message locally
+      addMessageLocally(sessionToUse, 'student', textToSend, imgToSend || '');
+      autoScrollToBottom();
+
+      try {
+        const currentMessagesList = [...messages, { sender: 'student', text: textToSend, imageUrl: imgToSend || '' }];
+        const recentHistory = currentMessagesList.slice(-12).map(m => ({
+          sender: m.sender,
+          text: m.text,
+          imageUrl: m.imageUrl
+        }));
+
+        const aiResponse = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messages: recentHistory,
+            welcomeMessageOverride: globalSettings.welcomeMessage
+          })
+        });
+
+        if (aiResponse.ok) {
+          const data = await aiResponse.json();
+          addMessageLocally(sessionToUse, 'teacher', data.text);
+        } else {
+          const errData = await aiResponse.json();
+          addMessageLocally(sessionToUse, 'teacher', `بارك الله فيك بني، يبدو أن هناك مشكلة حالية مع مفاتيح البرمجة: ${errData.error || 'عطل تقني'}. صلي على محمد و عاونا بدعوة خير.`);
+        }
+      } catch (err) {
+        console.error("Local chat error:", err);
+        addMessageLocally(sessionToUse, 'teacher', 'فشل الاتصال بخادم الذكاء الاصطناعي للأستاذ دالي. يرجى مراجعة الاتصال بالإنترنت والصلاة على محمد ﷺ.');
+      } finally {
+        setAiResponding(false);
+        autoScrollToBottom();
+      }
+      return;
+    }
+
+    // Otherwise, try standard Firestore flow with a try-catch fallback to Local
     try {
       if (!sessionToUse && user) {
-        // Automatically bootstrap a brand new session/room
+        // Automatically bootstrap a brand new session/room in Firestore
         const path = 'sessions';
         const docRef = await addDoc(collection(db, path), {
           userId: user.uid,
@@ -500,7 +754,6 @@ export default function App() {
           lastMessageAt: new Date().toISOString()
         });
         
-        // Seed first message with Al-Moalem's welcome message
         const msgPath = `sessions/${docRef.id}/messages`;
         await addDoc(collection(db, msgPath), {
           sender: 'teacher',
@@ -517,7 +770,6 @@ export default function App() {
         return;
       }
 
-      // 1. Add student message to Firestore
       const msgPath = `sessions/${sessionToUse}/messages`;
       await addDoc(collection(db, msgPath), {
         sender: 'student',
@@ -526,7 +778,6 @@ export default function App() {
         createdAt: new Date().toISOString()
       });
 
-      // Update session lastMessageAt timestamp
       await setDoc(doc(db, 'sessions', sessionToUse), {
         lastMessageAt: new Date().toISOString(),
         ...(textToSend ? { title: textToSend.substring(0, 30) + (textToSend.length > 30 ? '...' : '') } : {})
@@ -534,11 +785,6 @@ export default function App() {
 
       autoScrollToBottom();
 
-      // 2. Load complete chat history for Gemini Proxy API
-      const historySnapSnap = await getDoc(doc(db, 'sessions', sessionToUse));
-      const messageToAI: any[] = [];
-      
-      // Let's reload messages manually or slice the local ones to provide context (limit to last 15 messages)
       const currentMessagesList = [...messages, { sender: 'student', text: textToSend, imageUrl: imgToSend || '' }];
       const recentHistory = currentMessagesList.slice(-12).map(m => ({
         sender: m.sender,
@@ -546,7 +792,6 @@ export default function App() {
         imageUrl: m.imageUrl
       }));
 
-      // 3. Request Gemini proxy on our backend server
       const aiResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -560,23 +805,18 @@ export default function App() {
 
       if (aiResponse.ok) {
         const data = await aiResponse.json();
-        const teacherText = data.text;
-
-        // 4. Save AI response to Firestore
         await addDoc(collection(db, msgPath), {
           sender: 'teacher',
-          text: teacherText,
+          text: data.text,
           createdAt: new Date().toISOString()
         });
 
-        // Trigger session updated state again
         await setDoc(doc(db, 'sessions', sessionToUse), {
           lastMessageAt: new Date().toISOString()
         }, { merge: true });
 
       } else {
         const errData = await aiResponse.json();
-        // Fallback error reply
         await addDoc(collection(db, msgPath), {
           sender: 'teacher',
           text: `بارك الله فيك بني، يبدو أن هناك مشكلة حالية مع مفاتيح البرمجة: ${errData.error || 'عطل تقني'}. صلي على محمد و عاونا بدعوة خير.`,
@@ -585,7 +825,44 @@ export default function App() {
       }
 
     } catch (error) {
-      console.error('Chat error:', error);
+      console.warn('Standard Firestore write failed. Falling back to local storage routing.', error);
+      // Fallback seamlessly to local flow even if Firestore write fails!
+      if (!sessionToUse) {
+        sessionToUse = addSessionLocally(textToSend.substring(0, 30) + (textToSend.length > 30 ? '...' : ''));
+        setActiveSessionId(sessionToUse);
+      }
+      
+      addMessageLocally(sessionToUse, 'student', textToSend, imgToSend || '');
+      autoScrollToBottom();
+
+      try {
+        const currentMessagesList = [...messages, { sender: 'student', text: textToSend, imageUrl: imgToSend || '' }];
+        const recentHistory = currentMessagesList.slice(-12).map(m => ({
+          sender: m.sender,
+          text: m.text,
+          imageUrl: m.imageUrl
+        }));
+
+        const aiResponse = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messages: recentHistory,
+            welcomeMessageOverride: globalSettings.welcomeMessage
+          })
+        });
+
+        if (aiResponse.ok) {
+          const data = await aiResponse.json();
+          addMessageLocally(sessionToUse, 'teacher', data.text);
+        } else {
+          addMessageLocally(sessionToUse, 'teacher', 'حدث عطل تقني جزئي. يرجى الصلاة على محمد وعاود المحاولة بني.');
+        }
+      } catch (err) {
+        addMessageLocally(sessionToUse, 'teacher', 'فشل الاتصال بخادم الذكاء الاصطناعي للأستاذ دالي. يرجى الصلاة على محمد ﷺ.');
+      }
     } finally {
       setAiResponding(false);
       autoScrollToBottom();
@@ -594,20 +871,58 @@ export default function App() {
 
   // Handle students submitting function inquiries from the "Function Study Corner"
   const handleAskDaliFromCorner = async (promptText: string) => {
-    if (!user) {
-      alert("الرجاء تسجيل الدخول أولاً لطرح أسئلة على الأستاذ دالي 🇩🇿");
-      return;
-    }
-
     // Direct students to the chat tab
     setActiveTab('chat');
     setAiResponding(true);
 
-    try {
-      let sessionToUse = activeSessionId || viewingSessionId;
+    let sessionToUse = activeSessionId || viewingSessionId;
+    const isGuest = user?.uid === 'guest_student_local';
 
-      // 1. If no active session exists, bootstrap a brand new chat room first
+    if (isGuest) {
       if (!sessionToUse) {
+        sessionToUse = addSessionLocally(`دراسة دالة - ${new Date().toLocaleDateString('ar-DZ')}`);
+        setActiveSessionId(sessionToUse);
+      }
+
+      addMessageLocally(sessionToUse, 'student', promptText);
+      autoScrollToBottom();
+
+      try {
+        const recentHistory = [{
+          sender: 'student',
+          text: promptText,
+          imageUrl: ''
+        }];
+
+        const aiResponse = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messages: recentHistory,
+            welcomeMessageOverride: globalSettings.welcomeMessage
+          })
+        });
+
+        if (aiResponse.ok) {
+          const data = await aiResponse.json();
+          addMessageLocally(sessionToUse, 'teacher', data.text);
+        } else {
+          addMessageLocally(sessionToUse, 'teacher', 'حدث عطل جزئي في دراسة الدالة. يرجى الصلاة على محمد ﷺ.');
+        }
+      } catch (err) {
+        addMessageLocally(sessionToUse, 'teacher', 'فشل الاتصال بالأستاذ دالي لدراسة الدالة.');
+      } finally {
+        setAiResponding(false);
+        autoScrollToBottom();
+      }
+      return;
+    }
+
+    // Try standard Firestore flow with fallback
+    try {
+      if (!sessionToUse && user) {
         const path = 'sessions';
         const docRef = await addDoc(collection(db, path), {
           userId: user.uid,
@@ -617,7 +932,6 @@ export default function App() {
           lastMessageAt: new Date().toISOString()
         });
 
-        // Seed with Al-Moalem's welcome message
         const msgPath = `sessions/${docRef.id}/messages`;
         await addDoc(collection(db, msgPath), {
           sender: 'teacher',
@@ -629,7 +943,11 @@ export default function App() {
         setActiveSessionId(docRef.id);
       }
 
-      // 2. Add user question to Firestore
+      if (!sessionToUse) {
+        setAiResponding(false);
+        return;
+      }
+
       const msgPath = `sessions/${sessionToUse}/messages`;
       await addDoc(collection(db, msgPath), {
         sender: 'student',
@@ -638,7 +956,6 @@ export default function App() {
         createdAt: new Date().toISOString()
       });
 
-      // Update session lastMessageAt timestamp and title to "دراسة دالة"
       await setDoc(doc(db, 'sessions', sessionToUse), {
         lastMessageAt: new Date().toISOString(),
         title: `دراسة دالة بالتفصيل 📈`
@@ -646,14 +963,12 @@ export default function App() {
 
       autoScrollToBottom();
 
-      // 3. Assemble history with the new prompt
       const recentHistory = [{
         sender: 'student',
         text: promptText,
         imageUrl: ''
       }];
 
-      // 4. Send command directly to Gemini Proxy
       const aiResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -682,12 +997,47 @@ export default function App() {
         const errData = await aiResponse.json();
         await addDoc(collection(db, msgPath), {
           sender: 'teacher',
-          text: `بارك الله فيك بني، يبدو أن هناك مشكلة حالية مع مفاتيح البرمجة: ${errData.error || 'عطل تقني'}. صلي على محمد و عاونا بدعوة خير.`,
+          text: `فشل التحليل: ${errData.error || 'عطل تقني'}. صلي على محمد ﷺ والتمس لنا العذر بني.`,
           createdAt: new Date().toISOString()
         });
       }
-    } catch (error) {
-      console.error('Error in AI function study corner query:', error);
+    } catch (err) {
+      console.warn("Corner submit fallback:", err);
+      if (!sessionToUse) {
+        sessionToUse = addSessionLocally(`دراسة دالة - ${new Date().toLocaleDateString('ar-DZ')}`);
+        setActiveSessionId(sessionToUse);
+      }
+
+      addMessageLocally(sessionToUse, 'student', promptText);
+      autoScrollToBottom();
+
+      try {
+        const recentHistory = [{
+          sender: 'student',
+          text: promptText,
+          imageUrl: ''
+        }];
+
+        const aiResponse = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messages: recentHistory,
+            welcomeMessageOverride: globalSettings.welcomeMessage
+          })
+        });
+
+        if (aiResponse.ok) {
+          const data = await aiResponse.json();
+          addMessageLocally(sessionToUse, 'teacher', data.text);
+        } else {
+          addMessageLocally(sessionToUse, 'teacher', 'فشل تحليل الدالة في الوضع المحلي.');
+        }
+      } catch (e) {
+        addMessageLocally(sessionToUse, 'teacher', 'فشل الاتصال بالأستاذ.');
+      }
     } finally {
       setAiResponding(false);
       autoScrollToBottom();
@@ -991,7 +1341,7 @@ export default function App() {
               <span className="text-xs text-blue-400 font-bold block">🌟 ميزات تطبيق الأستاذ دالي:</span>
               <ul className="text-xs text-slate-300 space-y-2 list-disc list-inside">
                 <li>إجابات أكاديمية دقيقة وتدريجية في كافة المجالات ومادة الرياضيات.</li>
-                <li>أسلوب جزائري وطني أصيل يحمل في طياته الصلاة على محمد ﷺ.</li>
+                <li>أسلوب مبسط وموجه بعناية فائقة يحمل في طياته الصلاة على محمد ﷺ.</li>
                 <li><strong>نظام تفاعلي متقدم:</strong> يقوم الأستاذ بشرح مفهوم ثم يطرح عليك فوراً سؤال اختبار للتأكد من فهمك للSegmnet!</li>
                 <li>إمكانية رفع ومشاركة الصور للذكاء الاصطناعي لتحليلها فوراً.</li>
                 <li>لوحة تحكم آمنة وخاصة للأستاذ دالي لمتابعة أسئلة وملفات طلابه.</li>
@@ -1238,7 +1588,7 @@ export default function App() {
                                 </div>
                               )}
 
-                              <p className="whitespace-pre-line select-text">{msg.text}</p>
+                              <p className="whitespace-pre-line select-text">{formatStudentMathText(msg.text)}</p>
                             </div>
                           </div>
                         </div>
@@ -1623,51 +1973,47 @@ export default function App() {
               <p className="text-[11px] text-slate-400">تابع دراستك التفاعلية كبرنامج مستقل وسريع على هاتفك أو حاسوبك دون شريط المتصفح!</p>
             </div>
 
-            {/* Instruction blocks */}
-            <div className="mt-5 space-y-3 text-xs">
-              
-              {/* Android & Chrome */}
-              <div className="bg-[#070c1a] p-3 rounded-xl border border-slate-900 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-blue-300">
-                  <span className="text-base">🤖</span>
-                  <span>هواتف أندرويد ومتصفح كـروم:</span>
-                </div>
-                <p className="text-slate-400 leading-relaxed pr-6">
-                  إذا كان متصفحك يدعم التثبيت الفوري، فسيظهر لك نافذة منبثقة الآن. بخلاف ذلك، اضغط على زر خيارات المتصفح (المزيد) ثم اختر <strong className="text-slate-200">"تثبيت التطبيق"</strong> أو <strong className="text-slate-200">"إضافة للشاشة الرئيسية"</strong>.
-                </p>
-              </div>
+            {/* Direct Action triggers - No wordy instructions */}
+            <div className="mt-5 space-y-4 text-xs text-center">
+              <p className="text-slate-300 leading-relaxed">
+                يرجى الضغط على أحد الأزرار أدناه لتثبيت الاختصار مباشرة على شاشة هاتفك أو جهازك ليعمل كبرنامج سريع ومستقل:
+              </p>
 
-              {/* iOS / Safari */}
-              <div className="bg-[#070c1a] p-3 rounded-xl border border-slate-900 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-blue-300">
-                  <span className="text-base">🍎</span>
-                  <span>هواتف آيـفـون وآيـبـادا (Safari):</span>
-                </div>
-                <p className="text-slate-400 leading-relaxed pr-6">
-                  اضغط على زر المشاركة <strong className="text-blue-400">📤</strong> الموجود في شريط الأدوات بالأسفل، ثم مرر لأسفل واختر <strong className="text-slate-200">"إضافة إلى الشاشة الرئيسية" (Add to Home Screen)</strong> ➕ لتثبيته فوراً.
-                </p>
-              </div>
+              <div className="space-y-2.5">
+                <button
+                  onClick={async () => {
+                    setShowPwaGuide(false);
+                    if (deferredPrompt) {
+                      try {
+                        deferredPrompt.prompt();
+                        await deferredPrompt.userChoice;
+                        setDeferredPrompt(null);
+                        setPwaInstallable(false);
+                      } catch (e) {
+                        window.open(window.location.href, '_blank');
+                      }
+                    } else {
+                      window.open(window.location.href, '_blank');
+                    }
+                  }}
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-600/15 border border-emerald-555 flex items-center justify-center gap-2 hover:scale-[1.01]"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>تثبيت التطبيق فوراً تلقائياً 📱</span>
+                </button>
 
-              {/* Computers */}
-              <div className="bg-[#070c1a] p-3 rounded-xl border border-slate-900 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-blue-300">
-                  <span className="text-base">💻</span>
-                  <span>أجهزة الكمبيوتر والحاسوب:</span>
-                </div>
-                <p className="text-slate-400 leading-relaxed pr-6">
-                  انقر على أيقونة التثبيت <strong className="text-blue-400">🖥️ (شاشة التنزيل)</strong> التي تجدها في الزاوية العلوية لشريط العنوان بالمتصفح بجوار الرابط.
-                </p>
+                <button
+                  onClick={() => {
+                    setShowPwaGuide(false);
+                    window.open(window.location.href, '_blank');
+                  }}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-blue-600/15 border border-blue-500 flex items-center justify-center gap-2 hover:scale-[1.01]"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>فتح في نافذة مستقلة للاختصار الفوري 🚀</span>
+                </button>
               </div>
-
             </div>
-
-            {/* Close footer button */}
-            <button
-              onClick={() => setShowPwaGuide(false)}
-              className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition shadow-md shadow-blue-600/10 border border-blue-500"
-            >
-              حسناً، فهمت الطريقة 💡
-            </button>
 
           </div>
         </div>
