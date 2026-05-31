@@ -10,10 +10,14 @@ import https from 'https';
 dotenv.config();
 
 // Initialize firebase admin using our configuration file
-import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
+const firebaseConfig = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8')
+);
 import { getFirestore } from 'firebase-admin/firestore';
 
 let appInstance;
+let dbAdmin: any = null;
+
 if (!admin.apps.length) {
   try {
     appInstance = admin.initializeApp({
@@ -22,15 +26,21 @@ if (!admin.apps.length) {
     });
     console.log('Firebase Admin initialized for project:', firebaseConfig.projectId);
   } catch (error) {
-    console.error('Firebase Admin init error:', error);
+    console.warn('Firebase Admin init warning (this is normal when running outside of GCP e.g. on Vercel):', error);
   }
 } else {
   appInstance = admin.apps[0];
 }
 
-// Use specfied database ID from config to avoid the "5 NOT_FOUND: Database not found" error on custom databases
+// Use specified database ID from config to avoid the "5 NOT_FOUND: Database not found" error on custom databases
 const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
-const dbAdmin = getFirestore(appInstance, databaseId);
+if (appInstance) {
+  try {
+    dbAdmin = getFirestore(appInstance, databaseId);
+  } catch (error) {
+    console.warn('Failed to initialize Firestore Admin instance safely:', error);
+  }
+}
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -41,6 +51,10 @@ let rotationIndex = 0;
 
 // Helper to load private keys and rotate
 async function getRotatedApiKey(): Promise<string> {
+  if (!dbAdmin) {
+    console.log('[KEY ROTATION] Firestore Admin not initialized. Falling back immediately to environment GEMINI_API_KEY.');
+    return process.env.GEMINI_API_KEY || '';
+  }
   try {
     const docRef = dbAdmin.collection('settings').doc('private');
     const docSnap = await docRef.get();

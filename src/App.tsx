@@ -128,6 +128,7 @@ export default function App() {
   const isCreatingInitialRef = useRef(false);
 
   // Teacher Admin Authentication Fallback Modal State
+  const [onboardingAttempted, setOnboardingAttempted] = useState(false);
   const [teacherModalOpen, setTeacherModalOpen] = useState(false);
   const [teacherEmailInput, setTeacherEmailInput] = useState('');
   const [teacherPasswordInput, setTeacherPasswordInput] = useState('');
@@ -176,8 +177,11 @@ export default function App() {
 
   // Silent Onboarding for Students (No manual sign-in required)
   useEffect(() => {
+    if (authLoading || onboardingAttempted) return;
+
     const explicitLogout = localStorage.getItem('almoalem_explicit_logout') === 'true';
-    if (!authLoading && (!user || user.uid === 'guest_student_local') && !explicitLogout) {
+    if ((!user || user.uid === 'guest_student_local') && !explicitLogout) {
+      setOnboardingAttempted(true);
       setStudentSignInLoading(true);
       signInStudentAnonymously()
         .then((fbUser) => {
@@ -198,7 +202,7 @@ export default function App() {
           setStudentSignInLoading(false);
         });
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, onboardingAttempted]);
 
   // Sync PWA setup events
   useEffect(() => {
